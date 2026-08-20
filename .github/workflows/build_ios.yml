@@ -4,10 +4,15 @@ on:
   workflow_dispatch:
   push:
     branches: [ main, master ]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
 
 jobs:
   build-ipa:
-    runs-on: macos-latest
+    runs-on: macos-14 # 使用 Apple Silicon (M系列) 节点提升编译速度
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -16,6 +21,17 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          cache: 'pip'
+
+      # 缓存 kivy-ios 编译依赖，避免每次重复编译 OpenSSL/Python
+      - name: Cache Kivy-iOS Toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.kivy-ios
+          key: ${{ runner.os }}-kivy-ios-v1-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-kivy-ios-v1-
+            ${{ runner.os }}-kivy-ios-
 
       - name: Install dependencies & kivy-ios
         run: |
@@ -27,7 +43,7 @@ jobs:
           toolchain build python3 kivy
           toolchain create cloudflarescan .
 
-      - name: Compile Xcode project
+      - name: Compile Xcode & Package IPA
         run: |
           cd cloudflarescan-ios
           xcodebuild -project cloudflarescan.xcodeproj \
@@ -38,15 +54,14 @@ jobs:
                      CODE_SIGNING_REQUIRED=NO \
                      CODE_SIGNING_ALLOWED=NO \
                      clean build
-
-      - name: Package IPA for TrollStore
-        run: |
+          
+          # 打包为 TrollStore 可用的非签名 IPA
           mkdir -p Payload
-          cp -R cloudflarescan-ios/build/Release-iphoneos/*.app Payload/
-          zip -r CloudFlareScan_TrollStore.ipa Payload
+          cp -r build/Release-iphoneos/cloudflarescan.app Payload/
+          zip -r CloudFlareScan.ipa Payload
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CloudFlareScan_TrollStore_IPA
-          path: CloudFlareScan_TrollStore.ipa
+          name: CloudFlareScan-TrollStore
+          path: cloudflarescan-ios/CloudFlareScan.ipa
