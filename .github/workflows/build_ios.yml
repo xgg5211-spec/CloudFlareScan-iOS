@@ -11,7 +11,7 @@ on:
 
 jobs:
   build-ipa:
-    runs-on: macos-14 # 使用 Apple Silicon (M系列) 节点提升编译速度
+    runs-on: macos-14 # Apple Silicon (M系列) 节点
 
     steps:
       - name: Checkout repository
@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: '3.10'
 
-      # 缓存 kivy-ios 编译依赖，避免每次重复编译 OpenSSL/Python
+      # 缓存 Kivy-iOS 编译依赖
       - name: Cache Kivy-iOS Toolchain
         uses: actions/cache@v4
         with:
@@ -49,6 +49,8 @@ jobs:
                      -configuration Release \
                      -sdk iphoneos \
                      CONFIGURATION_BUILD_DIR=build/Release-iphoneos \
+                     IPHONEOS_DEPLOYMENT_TARGET=13.0 \
+                     ENABLE_USER_SCRIPT_SANDBOXING=NO \
                      CODE_SIGN_IDENTITY="" \
                      CODE_SIGNING_REQUIRED=NO \
                      CODE_SIGNING_ALLOWED=NO \
