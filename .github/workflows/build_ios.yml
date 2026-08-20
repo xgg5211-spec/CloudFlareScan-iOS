@@ -27,7 +27,7 @@ jobs:
         run: |
           echo "$(dirname $(which python3))" >> $GITHUB_PATH
 
-      # 恢复 Kivy-iOS 缓存
+      # 优先恢复 Kivy-iOS 编译缓存
       - name: Restore Kivy-iOS Cache
         uses: actions/cache/restore@v4
         with:
@@ -39,13 +39,18 @@ jobs:
           brew install autoconf automake libtool pkg-config
           pip install kivy-ios cython
 
-      # 关键修复：过滤 5 万行无用 DEBUG 刷屏日志，防止浏览器崩溃卡死
-      - name: Build Kivy iOS Toolchain
+      # 关键修复：隔离 App 源码目录，防止 rsync 扫描到自身 build 目录触发 code 24 崩溃
+      - name: Prepare App Source & Build Kivy iOS Toolchain
         run: |
+          mkdir -p app_src
+          cp main.py app_src/
+          cp *.py app_src/ 2>/dev/null || true
+          [ -d assets ] && cp -r assets app_src/ || true
+          
           toolchain build python3 kivy 2>&1 | grep -v -E "Listing '|compiling '" || true
-          toolchain create cloudflarescan .
+          toolchain create cloudflarescan app_src
 
-      # 强制保存编译环境缓存，防止重复等待
+      # 保存环境缓存
       - name: Save Kivy-iOS Cache
         uses: actions/cache/save@v4
         if: always()
@@ -72,7 +77,7 @@ jobs:
                      CODE_SIGN_IDENTITY="" \
                      build
           
-          # 打包为 TrollStore 可用的非签名 IPA
+          # 封装 TrollStore 非签名 IPA
           mkdir -p Payload
           APP_PATH=$(find . -name "cloudflarescan.app" -type d | head -n 1)
           cp -r "$APP_PATH" Payload/
