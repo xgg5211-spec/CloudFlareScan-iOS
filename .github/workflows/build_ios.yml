@@ -11,7 +11,7 @@ on:
 
 jobs:
   build-ipa:
-    runs-on: macos-14 # Apple Silicon (M系列) 节点
+    runs-on: macos-14 # 使用 Apple Silicon (M系列) 节点
 
     steps:
       - name: Checkout repository
@@ -43,22 +43,31 @@ jobs:
 
       - name: Compile Xcode & Package IPA
         run: |
+          # 关键点 1：将 Python 路径注入环境变量，供 Xcode 内置脚本调用
+          PYTHON_BIN_DIR=$(dirname $(which python3))
+          export PATH="$PYTHON_BIN_DIR:$PATH"
+          
           cd cloudflarescan-ios
+          
+          # 关键点 2：补全 ARM64 架构与泛用设备目标，禁用脚本沙盒及强制签名
           xcodebuild -project cloudflarescan.xcodeproj \
                      -scheme cloudflarescan \
                      -configuration Release \
                      -sdk iphoneos \
-                     CONFIGURATION_BUILD_DIR=build/Release-iphoneos \
+                     -destination 'generic/platform=iOS' \
+                     ARCHS="arm64" \
+                     ONLY_ACTIVE_ARCH=NO \
                      IPHONEOS_DEPLOYMENT_TARGET=13.0 \
                      ENABLE_USER_SCRIPT_SANDBOXING=NO \
-                     CODE_SIGN_IDENTITY="" \
-                     CODE_SIGNING_REQUIRED=NO \
                      CODE_SIGNING_ALLOWED=NO \
+                     CODE_SIGNING_REQUIRED=NO \
+                     CODE_SIGN_IDENTITY="" \
                      clean build
           
-          # 打包为 TrollStore 可用的非签名 IPA
+          # 打包为 TrollStore 可用的非签名 IPA（自动动态寻找编译好的 .app 目录）
           mkdir -p Payload
-          cp -r build/Release-iphoneos/cloudflarescan.app Payload/
+          APP_PATH=$(find . -name "cloudflarescan.app" -type d | head -n 1)
+          cp -r "$APP_PATH" Payload/
           zip -r CloudFlareScan.ipa Payload
 
       - name: Upload IPA Artifact
