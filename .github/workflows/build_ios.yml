@@ -22,19 +22,17 @@ jobs:
         with:
           python-version: '3.10'
 
-      # 关键修复 1：将 setup-python 环境强制写入 GitHub 全局 PATH，确保 Xcode 子 Shell 能读取
+      # 全局写入 Python 环境变量
       - name: Add Python to Global PATH
         run: |
           echo "$(dirname $(which python3))" >> $GITHUB_PATH
 
-      # 缓存 Kivy-iOS 编译依赖
-      - name: Cache Kivy-iOS Toolchain
-        uses: actions/cache@v4
+      # 恢复 Kivy-iOS 缓存
+      - name: Restore Kivy-iOS Cache
+        uses: actions/cache/restore@v4
         with:
           path: ~/.kivy-ios
           key: ${{ runner.os }}-kivy-ios-v1
-          restore-keys: |
-            ${{ runner.os }}-kivy-ios-
 
       - name: Install dependencies & kivy-ios
         run: |
@@ -46,11 +44,19 @@ jobs:
           toolchain build python3 kivy
           toolchain create cloudflarescan .
 
+      # 强制保存编译环境缓存，防止后续报错重新等待
+      - name: Save Kivy-iOS Cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: ~/.kivy-ios
+          key: ${{ runner.os }}-kivy-ios-v1
+
       - name: Compile Xcode & Package IPA
         run: |
           cd cloudflarescan-ios
           
-          # 关键修复 2：配置 Xcode 15 编译与脚本继承参数
+          # 关键修复：去掉 clean，仅保留 build，防止 rsync 拷贝文件时由于临时文件被清理引发 code 24 错误
           xcodebuild -project cloudflarescan.xcodeproj \
                      -scheme cloudflarescan \
                      -configuration Release \
@@ -64,7 +70,7 @@ jobs:
                      CODE_SIGNING_ALLOWED=NO \
                      CODE_SIGNING_REQUIRED=NO \
                      CODE_SIGN_IDENTITY="" \
-                     clean build
+                     build
           
           # 打包为 TrollStore 可用的非签名 IPA
           mkdir -p Payload
