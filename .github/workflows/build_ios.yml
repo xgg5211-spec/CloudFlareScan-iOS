@@ -25,13 +25,13 @@ jobs:
       - name: Build Kivy iOS Toolchain
         run: |
           toolchain build python3 kivy
-          toolchain create CloudFlareScan .
+          toolchain create cloudflarescan .
 
       - name: Compile Xcode project
         run: |
           cd cloudflarescan-ios
-          xcodebuild -project CloudFlareScan.xcodeproj \
-                     -scheme CloudFlareScan \
+          xcodebuild -project cloudflarescan.xcodeproj \
+                     -scheme cloudflarescan \
                      -configuration Release \
                      -sdk iphoneos \
                      CODE_SIGN_IDENTITY="" \
@@ -42,7 +42,7 @@ jobs:
       - name: Package IPA for TrollStore
         run: |
           mkdir -p Payload
-          cp -R cloudflarescan-ios/build/Release-iphoneos/CloudFlareScan.app Payload/
+          cp -R cloudflarescan-ios/build/Release-iphoneos/*.app Payload/
           zip -r CloudFlareScan_TrollStore.ipa Payload
 
       - name: Upload IPA Artifact
