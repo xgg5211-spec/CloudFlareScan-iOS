@@ -2,10 +2,9 @@ import json
 import re
 import ssl
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import urllib.request
 
-# 1. 机房代码转中文地区
+# 地区代码映射
 CF_COLO = {
     "HKG": "中国·香港", "TPE": "中国·台湾", "KHH": "中国·高雄",
     "NRT": "日本·东京", "KIX": "日本·大阪", "ICN": "韩国·首尔",
@@ -14,134 +13,103 @@ CF_COLO = {
     "FRA": "德国·法兰克福", "LHR": "英国·伦敦", "CDG": "法国·巴黎"
 }
 
-# 忽略 SSL 证书校验（防止移动端证书报错引发闪退）
-SSL_CTX = ssl.create_default_context()
-SSL_CTX.check_hostname = False
-SSL_CTX.verify_mode = ssl.CERT_NONE
-
+# 忽略 SSL 验证（防止移动端证书报错引发闪退）
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
 
 def parse_region(colo):
-    """自动识别地区"""
-    if not colo:
-        return "其它地区"
+    if not colo: return "其它地区"
     code = str(colo).strip().upper()
     return CF_COLO.get(code, f"其它地区({code})")
 
-
-def parse_ips(raw_text):
-    """自定义 IP 清洗：自动补齐 :443 + 去重"""
-    lines = re.split(r'[\r\n,\s]+', str(raw_text).strip())
+def parse_ips(text):
+    """自动补充 :443 端口并去重"""
+    lines = re.split(r'[\r\n,\s]+', str(text).strip())
     seen = set()
     ips = []
     for line in lines:
         item = line.strip()
-        if not item:
-            continue
-        if ":" not in item:
-            item = f"{item}:443"
+        if not item: continue
+        if ":" not in item: item = f"{item}:443"
         if item not in seen:
             seen.add(item)
             ips.append(item)
     return ips
 
-
-def test_speed(ip_port):
-    """测真实速度 (下载 256KB 测试包)"""
+def test_node(ip_port):
+    """单线程绝对安全检测：验真 + 延迟 + 测速"""
     try:
-        proxy_handler = urllib.request.ProxyHandler({'http': f'http://{ip_port}', 'https': f'http://{ip_port}'})
-        opener = urllib.request.build_opener(proxy_handler)
-        
-        speed_url = "https://speed.cloudflare.com/__down?bytes=262144"
-        start_t = time.time()
-        
-        req = urllib.request.Request(speed_url, headers={'User-Agent': 'Mozilla/5.0'})
-        with opener.open(req, timeout=2.0) as resp:
-            content = resp.read()
-            duration = time.time() - start_t
-            if duration > 0 and len(content) > 0:
-                return round((len(content) / 1024) / duration, 1)
-    except Exception:
-        pass
-    return 0.0
-
-
-def check_one_ip(ip_port):
-    """测真实探针与延迟（全量异常拦截，决不崩溃）"""
-    try:
-        url = f"https://check.proxyip.cmliussss.net/check?proxyip={ip_port}"
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        
-        start_time = time.time()
-        with urllib.request.urlopen(req, timeout=3.0, context=SSL_CTX) as response:
-            if response.status != 200:
-                return None
-            
-            latency = round((time.time() - start_time) * 1000, 1)
-            data = json.loads(response.read().decode('utf-8'))
-            
-            # 网页探针校验失败直接剔除
-            if not data.get("success"):
-                return None
-            
-            real_latency = data.get("responseTime", latency)
+        # 1. 探针验真与延迟
+        check_url = f"https://check.proxyip.cmliussss.net/check?proxyip={ip_port}"
+        req = urllib.request.Request(check_url, headers={'User-Agent': 'Mozilla/5.0'})
+        t0 = time.time()
+        with urllib.request.urlopen(req, timeout=2.5, context=ctx) as resp:
+            if resp.status != 200: return None
+            latency = round((time.time() - t0) * 1000, 1)
+            data = json.loads(resp.read().decode('utf-8'))
+            if not data.get("success"): return None
             region = parse_region(data.get("colo", ""))
-            speed = test_speed(ip_port)
-            
-            return {
-                "ip": ip_port,
-                "latency": real_latency,
-                "region": region,
-                "speed": speed
-            }
+            real_latency = data.get("responseTime", latency)
+
+        # 2. 下载测速（小数据包防卡死）
+        speed = 0.0
+        try:
+            proxy_h = urllib.request.ProxyHandler({'http': f'http://{ip_port}', 'https': f'http://{ip_port}'})
+            opener = urllib.request.build_opener(proxy_h)
+            s_req = urllib.request.Request("https://speed.cloudflare.com/__down?bytes=102400", headers={'User-Agent': 'Mozilla/5.0'})
+            st = time.time()
+            with opener.open(s_req, timeout=2.0) as s_resp:
+                buf = s_resp.read()
+                dur = time.time() - st
+                if dur > 0 and len(buf) > 0:
+                    speed = round((len(buf) / 1024) / dur, 1)
+        except Exception:
+            pass
+
+        return {"ip": ip_port, "region": region, "latency": real_latency, "speed": speed}
     except Exception:
         return None
 
+def main():
+    try:
+        # 在此处粘贴自定义 IP 文本
+        raw_text = """
+        103.21.244.13
+        173.245.60.252:443
+        188.114.106.185:2053
+        """
 
-def run_scan(raw_ips_text, max_workers=3):
-    """
-    主运行入口
-    max_workers=3：低并发，彻底解决移动端闪退
-    """
-    targets = parse_ips(raw_ips_text)
-    if not targets:
-        print("❌ 未识别到有效 IP")
-        return []
+        targets = parse_ips(raw_text)
+        if not targets:
+            print("未检测到有效 IP")
+            return
 
-    print(f"🔍 开始检测 {len(targets)} 个 IP...")
-    results = []
+        print(f"正在检测 {len(targets)} 个 IP...\n")
+        results = []
 
-    # 使用 Python 原生标准线程池，线程数设为 3 极其稳定
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(check_one_ip, ip) for ip in targets]
-        for future in as_completed(futures):
-            try:
-                res = future.result()
-                if res:
-                    results.append(res)
-                    print(f"✅ {res['ip']:<21} | {res['region']:<10} | {res['latency']:>5}ms | {res['speed']:>6} KB/s")
-            except Exception:
-                pass
+        # 放弃一切多线程，采用纯单线程逐个检测，彻底消除 iOS 线程崩溃
+        for ip in targets:
+            res = test_node(ip)
+            if res:
+                results.append(res)
+                print(f"✅ {res['ip']:<21} | {res['region']:<10} | 延迟:{res['latency']:>5}ms | 速度:{res['speed']:>6}KB/s")
 
-    # 按延迟升序排序
-    results.sort(key=lambda x: x["latency"])
+        results.sort(key=lambda x: x["latency"])
 
-    # 打印便于一键复制的纯 IP 结果
-    print("\n" + "="*45)
-    print("📋 【检测完成 - 纯 IP 列表（直接长按复制）】")
-    print("="*45)
-    for item in results:
-        print(item["ip"])
+        print("\n" + "=" * 40)
+        print("【纯 IP 列表（直接长按全选复制）】")
+        print("=" * 40)
+        for item in results:
+            print(item["ip"])
 
-    return results
+    except BaseException as e:
+        print(f"捕获异常: {e}")
 
-
-# ==================== 运行测试 ====================
 if __name__ == "__main__":
-    # 在此放入你的自定义 IP 文本（支持带端口/不带端口）
-    custom_text = """
-    103.21.244.13
-    173.245.60.252:443
-    188.114.106.185:2053
-    """
-
-    run_scan(custom_text)
+    main()
+    
+    # 核心解决点：iOS 上脚本运行完如果不挂起，App 会直接关闭退出（让你误以为是闪退）
+    print("\n检测完成！已保持运行，请直接复制上方 IP。")
+    while True:
+        time.sleep(3600)
