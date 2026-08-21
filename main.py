@@ -2,9 +2,18 @@ import json
 import re
 import ssl
 import time
+import threading
 import urllib.request
 
-# 地区代码映射
+from kivy.app import App
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.textinput import TextInput
+from kivy.uix.button import Button
+from kivy.uix.label import Label
+from kivy.core.clipboard import Clipboard
+from kivy.clock import Clock
+
+# 机房代码转中文地区
 CF_COLO = {
     "HKG": "中国·香港", "TPE": "中国·台湾", "KHH": "中国·高雄",
     "NRT": "日本·东京", "KIX": "日本·大阪", "ICN": "韩国·首尔",
@@ -13,47 +22,76 @@ CF_COLO = {
     "FRA": "德国·法兰克福", "LHR": "英国·伦敦", "CDG": "法国·巴黎"
 }
 
-# 忽略 SSL 验证（防止移动端证书报错引发闪退）
-ctx = ssl.create_default_context()
-ctx.check_hostname = False
-ctx.verify_mode = ssl.CERT_NONE
+SSL_CTX = ssl.create_default_context()
+SSL_CTX.check_hostname = False
+SSL_CTX.verify_mode = ssl.CERT_NONE
 
-def parse_region(colo):
-    if not colo: return "其它地区"
-    code = str(colo).strip().upper()
-    return CF_COLO.get(code, f"其它地区({code})")
+class ProxyScannerApp(App):
+    def build(self):
+        self.title = "Proxy IP 扫描器"
+        self.valid_ips = []
 
-def parse_ips(text):
-    """自动补充 :443 端口并去重"""
-    lines = re.split(r'[\r\n,\s]+', str(text).strip())
-    seen = set()
-    ips = []
-    for line in lines:
-        item = line.strip()
-        if not item: continue
-        if ":" not in item: item = f"{item}:443"
-        if item not in seen:
-            seen.add(item)
-            ips.append(item)
-    return ips
+        layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
 
-def test_node(ip_port):
-    """单线程绝对安全检测：验真 + 延迟 + 测速"""
-    try:
-        # 1. 探针验真与延迟
-        check_url = f"https://check.proxyip.cmliussss.net/check?proxyip={ip_port}"
-        req = urllib.request.Request(check_url, headers={'User-Agent': 'Mozilla/5.0'})
-        t0 = time.time()
-        with urllib.request.urlopen(req, timeout=2.5, context=ctx) as resp:
-            if resp.status != 200: return None
-            latency = round((time.time() - t0) * 1000, 1)
-            data = json.loads(resp.read().decode('utf-8'))
-            if not data.get("success"): return None
-            region = parse_region(data.get("colo", ""))
-            real_latency = data.get("responseTime", latency)
+        # 标题
+        layout.add_widget(Label(text="Proxy IP 校验与测速", size_hint_y=None, height=35, font_size=18, bold=True))
 
-        # 2. 下载测速（小数据包防卡死）
-        speed = 0.0
+        # 自定义 IP 输入框
+        self.input_text = TextInput(
+            text="103.21.244.13\n173.245.60.252:443\n188.114.106.185:2053",
+            hint_text="粘贴自定义 IP (每行一个，自动补齐 :443)",
+            multiline=True,
+            size_hint_y=0.25
+        )
+        layout.add_widget(self.input_text)
+
+        # 操作按钮区
+        btn_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=45, spacing=10)
+        
+        self.scan_btn = Button(text="开始检测", background_color=(0.2, 0.6, 1, 1))
+        self.scan_btn.bind(on_press=self.start_scan)
+        btn_layout.add_widget(self.scan_btn)
+
+        self.copy_btn = Button(text="一键复制 IP", background_color=(0.2, 0.8, 0.2, 1))
+        self.copy_btn.bind(on_press=self.copy_results)
+        btn_layout.add_widget(self.copy_btn)
+
+        layout.add_widget(btn_layout)
+
+        # 状态指示
+        self.status_label = Label(text="状态: 准备就绪", size_hint_y=None, height=30)
+        layout.add_widget(self.status_label)
+
+        # 结果输出框
+        self.result_text = TextInput(
+            text="",
+            readonly=True,
+            multiline=True,
+            hint_text="检测结果将在此处显示..."
+        )
+        layout.add_widget(self.result_text)
+
+        return layout
+
+    def parse_region(self, colo):
+        if not colo: return "其它地区"
+        code = str(colo).strip().upper()
+        return CF_COLO.get(code, f"其它地区({code})")
+
+    def parse_ips(self, raw_text):
+        lines = re.split(r'[\r\n,\s]+', str(raw_text).strip())
+        seen = set()
+        ips = []
+        for line in lines:
+            item = line.strip()
+            if not item: continue
+            if ":" not in item: item = f"{item}:443"
+            if item not in seen:
+                seen.add(item)
+                ips.append(item)
+        return ips
+
+    def test_speed(self, ip_port):
         try:
             proxy_h = urllib.request.ProxyHandler({'http': f'http://{ip_port}', 'https': f'http://{ip_port}'})
             opener = urllib.request.build_opener(proxy_h)
@@ -63,53 +101,74 @@ def test_node(ip_port):
                 buf = s_resp.read()
                 dur = time.time() - st
                 if dur > 0 and len(buf) > 0:
-                    speed = round((len(buf) / 1024) / dur, 1)
+                    return round((len(buf) / 1024) / dur, 1)
         except Exception:
             pass
+        return 0.0
 
-        return {"ip": ip_port, "region": region, "latency": real_latency, "speed": speed}
-    except Exception:
-        return None
+    def check_one_ip(self, ip_port):
+        try:
+            url = f"https://check.proxyip.cmliussss.net/check?proxyip={ip_port}"
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            t0 = time.time()
+            with urllib.request.urlopen(req, timeout=2.5, context=SSL_CTX) as resp:
+                if resp.status != 200: return None
+                latency = round((time.time() - t0) * 1000, 1)
+                data = json.loads(resp.read().decode('utf-8'))
+                if not data.get("success"): return None
+                region = self.parse_region(data.get("colo", ""))
+                real_latency = data.get("responseTime", latency)
+                speed = self.test_speed(ip_port)
+                return {"ip": ip_port, "region": region, "latency": real_latency, "speed": speed}
+        except Exception:
+            return None
 
-def main():
-    try:
-        # 在此处粘贴自定义 IP 文本
-        raw_text = """
-        103.21.244.13
-        173.245.60.252:443
-        188.114.106.185:2053
-        """
+    def start_scan(self, instance):
+        self.scan_btn.disabled = True
+        self.status_label.text = "状态: 正在检测中..."
+        self.result_text.text = ""
+        self.valid_ips = []
+        # 使用后台独立线程处理网络访问，防止主线程卡死黑屏
+        threading.Thread(target=self._async_scan, daemon=True).start()
 
-        targets = parse_ips(raw_text)
+    def _async_scan(self):
+        targets = self.parse_ips(self.input_text.text)
         if not targets:
-            print("未检测到有效 IP")
+            Clock.schedule_once(lambda dt: self._update_status("未识别到有效的 IP！", False))
             return
 
-        print(f"正在检测 {len(targets)} 个 IP...\n")
         results = []
+        total = len(targets)
 
-        # 放弃一切多线程，采用纯单线程逐个检测，彻底消除 iOS 线程崩溃
-        for ip in targets:
-            res = test_node(ip)
+        for idx, ip in enumerate(targets, 1):
+            Clock.schedule_once(lambda dt, i=idx, t=total: self._update_status(f"检测中 ({i}/{t})...", True))
+            res = self.check_one_ip(ip)
             if res:
                 results.append(res)
-                print(f"✅ {res['ip']:<21} | {res['region']:<10} | 延迟:{res['latency']:>5}ms | 速度:{res['speed']:>6}KB/s")
+                log_line = f"✅ {res['ip']:<21} | {res['region']:<8} | {res['latency']}ms | {res['speed']}KB/s\n"
+                Clock.schedule_once(lambda dt, line=log_line: self._append_result(line))
 
         results.sort(key=lambda x: x["latency"])
+        self.valid_ips = [r["ip"] for r in results]
 
-        print("\n" + "=" * 40)
-        print("【纯 IP 列表（直接长按全选复制）】")
-        print("=" * 40)
-        for item in results:
-            print(item["ip"])
+        final_msg = f"检测完成！找到 {len(self.valid_ips)} 个有效 IP"
+        Clock.schedule_once(lambda dt: self._update_status(final_msg, False))
 
-    except BaseException as e:
-        print(f"捕获异常: {e}")
+    def _update_status(self, text, is_scanning):
+        self.status_label.text = f"状态: {text}"
+        if not is_scanning:
+            self.scan_btn.disabled = False
+
+    def _append_result(self, line):
+        self.result_text.text += line
+
+    def copy_results(self, instance):
+        if self.valid_ips:
+            text_to_copy = "\n".join(self.valid_ips)
+            Clipboard.copy(text_to_copy)
+            self.status_label.text = "状态: 已成功复制有效 IP 到剪贴板！"
+        else:
+            self.status_label.text = "状态: 暂无有效 IP 可复制！"
 
 if __name__ == "__main__":
-    main()
-    
-    # 核心解决点：iOS 上脚本运行完如果不挂起，App 会直接关闭退出（让你误以为是闪退）
-    print("\n检测完成！已保持运行，请直接复制上方 IP。")
-    while True:
-        time.sleep(3600)
+    ProxyScannerApp().run()
