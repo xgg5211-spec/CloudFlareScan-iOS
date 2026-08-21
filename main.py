@@ -1,211 +1,298 @@
-# -*- coding: utf-8 -*-
-import os
-import sys
+import asyncio
+import ipaddress
+import ssl
 import time
-import socket
-import threading
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 from kivy.app import App
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.gridlayout import GridLayout
-from kivy.uix.label import Label
-from kivy.uix.button import Button
-from kivy.uix.textinput import TextInput
 from kivy.clock import Clock
-from kivy.core.clipboard import Clipboard
+from kivy.lang import Builder
+from kivy.properties import BooleanProperty, NumericProperty, StringProperty
+from kivy.uix.boxlayout import BoxLayout
 
-class CloudFlareScaniOSApp(App):
+# 赛博朋克炫彩 UI (KV 布局语言)
+KV_STYLE = """
+#:kivy 2.0.0
+
+<CyberButton@Button>:
+    background_normal: ''
+    background_color: 0, 0, 0, 0
+    font_size: '14sp'
+    bold: True
+    color: (0/255, 243/255, 255/255, 1) if self.state == 'normal' else (1, 1, 1, 1)
+    canvas.before:
+        Color:
+            rgba: (0/255, 243/255, 255/255, 0.8) if self.state == 'normal' else (255/255, 0/255, 85/255, 1)
+        Line:
+            rounded_rectangle: (self.x, self.y, self.width, self.height, 8)
+            width: 1.2
+        Color:
+            rgba: (13/255, 20/255, 30/255, 0.85)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [8,]
+
+<MainUI>:
+    canvas.before:
+        Color:
+            rgba: (13/255, 14/255, 21/255, 1) # 极夜黑深色背景
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+    BoxLayout:
+        orientation: 'vertical'
+        padding: 15
+        spacing: 12
+
+        # 1. 顶栏：炫彩标题与状态控制
+        BoxLayout:
+            size_hint_y: None
+            height: 40
+            Label:
+                text: "[b][color=00f3ff]CLOUDFLARE[/color] [color=ff0055]SCANNER[/color][/b]"
+                markup: True
+                font_size: '20sp'
+                halign: 'left'
+                text_size: self.size
+
+            Label:
+                text: root.status_text
+                color: (0, 1, 0.6, 1)
+                font_size: '12sp'
+                halign: 'right'
+                text_size: self.size
+
+        # 2. 自定义 IP 输入框（带霓虹暗框）
+        BoxLayout:
+            orientation: 'vertical'
+            size_hint_y: 0.3
+            spacing: 5
+            Label:
+                text: "[color=888888]自定义 IP / CIDR 网段 (多条用换行隔开):[/color]"
+                markup: True
+                font_size: '12sp'
+                size_hint_y: None
+                height: 20
+                halign: 'left'
+                text_size: self.size
+
+            TextInput:
+                id: ip_input
+                hint_text: "104.16.0.0/16\\n172.67.0.1"
+                background_color: (20/255, 25/255, 35/255, 1)
+                foreground_color: (0/255, 243/255, 255/255, 1)
+                cursor_color: (255/255, 0/255, 85/255, 1)
+                padding: [10, 10]
+
+        # 3. 核心功能控制按钮组
+        BoxLayout:
+            size_hint_y: None
+            height: 42
+            spacing: 10
+
+            CyberButton:
+                text: "SYNC CLOUD IP"
+                on_release: root.on_sync_cloud_ips()
+
+            CyberButton:
+                text: "STOP" if root.is_scanning else "START SCAN"
+                on_release: root.toggle_scan()
+
+        # 4. 扫描结果展示区域
+        BoxLayout:
+            orientation: 'vertical'
+            canvas.before:
+                Color:
+                    rgba: (0/255, 243/255, 255/255, 0.2)
+                Line:
+                    rounded_rectangle: (self.x, self.y, self.width, self.height, 6)
+                    width: 1
+
+            TextInput:
+                id: result_log
+                text: root.log_content
+                readonly: True
+                background_color: (10/255, 12/255, 18/255, 1)
+                foreground_color: (0, 1, 0.8, 1)
+                font_size: '12sp'
+                padding: [10, 10]
+"""
+
+Builder.load_string(KV_STYLE)
+
+# 用于 CPU 耗时任务（如解析万级 IP 段）的后台线程池
+executor = ThreadPoolExecutor(max_workers=2)
+
+
+class MainUI(BoxLayout):
+    status_text = StringProperty("系统就绪")
+    log_content = StringProperty("=== 赛博扫描器已准备就绪 ===\n点击 [SYNC CLOUD IP] 获取官方 IP 库\n点击 [START SCAN] 开始 TLS 真连接测速\n")
+    is_scanning = BooleanProperty(False)
+    total_scanned = NumericProperty(0)
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.stop_event = threading.Event()
-        self.logs = []
-        self.results = []
-        self.current_tab = "log"
+        self.scan_task = None
+        self.ip_queue = []
 
-    def build(self):
-        self.title = "CloudFlare Scan"
-
-        main_layout = BoxLayout(orientation='vertical', padding=10, spacing=6)
-
-        # 1. 顶部标题
-        title_lbl = Label(
-            text="CloudFlare Scan (iOS)",
-            font_size=22,
-            bold=True,
-            size_hint_y=0.08,
-            color=(1, 0.4, 0, 1)
-        )
-        main_layout.add_widget(title_lbl)
-
-        # 2. 功能按钮区
-        grid_btns1 = GridLayout(cols=3, spacing=6, size_hint_y=0.08)
-        self.btn_v4 = Button(text="IPv4 扫描", background_color=(0.2, 0.5, 1, 1), on_press=lambda x: self.start_scan("v4"))
-        self.btn_v6 = Button(text="IPv6 扫描", background_color=(0.2, 0.8, 0.4, 1), on_press=lambda x: self.start_scan("v6"))
-        self.btn_stop = Button(text="停止任务", background_color=(0.8, 0.8, 0.8, 1), disabled=True, on_press=self.stop_scan)
+    # ---------------- 1. 自动对接云端 IP 库 ----------------
+    def on_sync_cloud_ips(self):
+        if self.is_scanning:
+            return
+        self.status_text = "正在同步云端 IP..."
+        self.append_log("[+] 开始从 Cloudflare 官方同步最新 IPv4 库...")
         
-        grid_btns1.add_widget(self.btn_v4)
-        grid_btns1.add_widget(self.btn_v6)
-        grid_btns1.add_widget(self.btn_stop)
-        main_layout.add_widget(grid_btns1)
+        # 使用线程异步请求，防止阻塞主界面
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(executor, self._fetch_remote_ips_thread)
 
-        grid_btns2 = GridLayout(cols=3, spacing=6, size_hint_y=0.08)
-        self.btn_region = Button(text="地区测速", background_color=(0.9, 0.3, 0.6, 1))
-        self.btn_full = Button(text="完全测速", background_color=(1, 0.5, 0, 1))
-        self.btn_export = Button(text="复制结果", background_color=(0.7, 0.7, 0.7, 1), on_press=self.export_results)
-        
-        grid_btns2.add_widget(self.btn_region)
-        grid_btns2.add_widget(self.btn_full)
-        grid_btns2.add_widget(self.btn_export)
-        main_layout.add_widget(grid_btns2)
+    def _fetch_remote_ips_thread(self):
+        url = "https://www.cloudflare.com/ips-v4"
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=6) as response:
+                content = response.read().decode('utf-8')
+                cidrs = [line.strip() for line in content.splitlines() if line.strip()]
+                Clock.schedule_once(lambda dt: self._on_sync_success(cidrs))
+        except Exception as e:
+            Clock.schedule_once(lambda dt: self._on_sync_failed(str(e)))
 
-        # 3. 参数配置区
-        param_grid = GridLayout(cols=3, spacing=6, size_hint_y=0.14)
-        self.input_region = TextInput(hint_text="地区码", multiline=False)
-        self.input_count = TextInput(text="10", hint_text="测速数量", multiline=False, input_filter="int")
-        self.input_port = TextInput(text="443", hint_text="端口", multiline=False, input_filter="int")
-        self.input_threads = TextInput(text="15", hint_text="并发(<=20)", multiline=False, input_filter="int")
-        self.input_max_latency = TextInput(text="300", hint_text="延迟上限ms", multiline=False, input_filter="int")
-        dummy_label = Label(text="")
+    def _on_sync_success(self, cidrs):
+        self.ids.ip_input.text = "\n".join(cidrs)
+        self.status_text = f"已获取 {len(cidrs)} 个网段"
+        self.append_log(f"[✓] 云端 IP 库同步成功！已自动填入输入框。")
 
-        param_grid.add_widget(self.input_region)
-        param_grid.add_widget(self.input_count)
-        param_grid.add_widget(self.input_port)
-        param_grid.add_widget(self.input_threads)
-        param_grid.add_widget(self.input_max_latency)
-        param_grid.add_widget(dummy_label)
-        main_layout.add_widget(param_grid)
+    def _on_sync_failed(self, err_msg):
+        self.status_text = "同步失败"
+        self.append_log(f"[X] 同步云端 IP 失败: {err_msg}")
 
-        # 4. 状态栏
-        status_box = BoxLayout(orientation='horizontal', size_hint_y=0.05)
-        self.lbl_status = Label(text="就绪", size_hint_x=0.6, halign="left")
-        self.lbl_speed = Label(text="速度: 0.0 IP/s", size_hint_x=0.4, halign="right")
-        status_box.add_widget(self.lbl_status)
-        status_box.add_widget(self.lbl_speed)
-        main_layout.add_widget(status_box)
-
-        # 5. 选项卡
-        tab_box = BoxLayout(orientation='horizontal', size_hint_y=0.07, spacing=4)
-        self.btn_tab_log = Button(text="扫描日志", on_press=lambda x: self.switch_tab("log"))
-        self.btn_tab_result = Button(text="测速结果", on_press=lambda x: self.switch_tab("result"))
-        tab_box.add_widget(self.btn_tab_log)
-        tab_box.add_widget(self.btn_tab_result)
-        main_layout.add_widget(tab_box)
-
-        # 6. 主文本展示区
-        self.text_display = TextInput(
-            readonly=True,
-            multiline=True,
-            size_hint_y=0.50,
-            background_color=(0.08, 0.12, 0.18, 1),
-            foreground_color=(0.9, 0.9, 0.9, 1)
-        )
-        main_layout.add_widget(self.text_display)
-
-        return main_layout
-
-    def switch_tab(self, tab_name):
-        self.current_tab = tab_name
-        if tab_name == "log":
-            self.text_display.text = "".join(self.logs[-100:])
+    # ---------------- 2. 异步解析输入框中的自定义 IP（防卡顿） ----------------
+    def toggle_scan(self):
+        if self.is_scanning:
+            self.stop_scan()
         else:
-            self.text_display.text = "IP 地址 | 端口 | 延迟\n" + "-"*35 + "\n" + "".join(self.results)
+            self.start_scan()
+
+    def start_scan(self):
+        raw_text = self.ids.ip_input.text.strip()
+        if not raw_text:
+            self.append_log("[!] 请先输入 IP 段或点击 SYNC 同步云端 IP 库。")
+            return
+
+        self.is_scanning = True
+        self.status_text = "解析 IP 中..."
+        self.append_log("[+] 后台异步解析 IP 地址中，请稍候...")
+        
+        # 将耗时的 CIDR 展开逻辑放入线程池，UI 保持流畅
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(executor, self._parse_ips_worker, raw_text)
+
+    def _parse_ips_worker(self, raw_text):
+        ip_set = set()
+        for line in raw_text.splitlines():
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            try:
+                if '/' in line:
+                    net = ipaddress.ip_network(line, strict=False)
+                    # 采样抽取 IP，避免 CIDR 展开爆内存
+                    for idx, ip in enumerate(net.hosts()):
+                        if idx % 8 == 0:  # 每 8 个 IP 抽取 1 个
+                            ip_set.add(str(ip))
+                        if len(ip_set) >= 3000: # 最大限制 3000 个
+                            break
+                else:
+                    ip_set.add(str(ipaddress.ip_address(line)))
+            except ValueError:
+                continue
+        
+        parsed_list = list(ip_set)
+        Clock.schedule_once(lambda dt: self._start_async_ping(parsed_list))
+
+    # ---------------- 3. TLS 真实握手测速（真连接测速） ----------------
+    def _start_async_ping(self, ip_list):
+        if not ip_list:
+            self.append_log("[!] 未解析到有效 IP 地址。")
+            self.is_scanning = False
+            self.status_text = "就绪"
+            return
+
+        self.ip_queue = ip_list
+        self.status_text = f"测速中 (0/{len(ip_list)})"
+        self.append_log(f"[+] 解析出 {len(ip_list)} 个目标 IP，开始 TLS 握手测速...")
+
+        # 开启并发异步扫描
+        self.scan_task = asyncio.create_task(self._scanner_coroutine(ip_list))
+
+    async def _real_tls_ping(self, ip, semaphore, port=443):
+        """原生 TLS 握手延迟测试"""
+        async with semaphore:
+            if not self.is_scanning:
+                return None
+            
+            ssl_ctx = ssl.create_default_context()
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
+
+            start_time = time.perf_counter()
+            try:
+                # 发起完整 TLS 加密握手
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(ip, port, ssl=ssl_ctx, server_hostname="speed.cloudflare.com"),
+                    timeout=2.0
+                )
+                latency = (time.perf_counter() - start_time) * 1000
+                writer.close()
+                await writer.wait_closed()
+                return ip, round(latency, 2)
+            except Exception:
+                return ip, None
+
+    async def _scanner_coroutine(self, ip_list):
+        semaphore = asyncio.Semaphore(30) # 限制 30 并发，完美适配 iOS Socket 限制
+        completed = 0
+        total = len(ip_list)
+
+        tasks = [self._real_tls_ping(ip, semaphore) for ip in ip_list]
+        
+        for future in asyncio.as_completed(tasks):
+            if not self.is_scanning:
+                break
+            result = await future
+            completed += 1
+            
+            if completed % 10 == 0 or completed == total:
+                self.status_text = f"测速中 ({completed}/{total})"
+
+            if result:
+                ip, latency = result
+                if latency is not None:
+                    self.append_log(f"[成功] IP: {ip:<15}  TLS 延迟: {latency} ms")
+
+        self.append_log("[✓] 扫描任务已完成！")
+        self.is_scanning = False
+        self.status_text = "完成"
+
+    def stop_scan(self):
+        self.is_scanning = False
+        if self.scan_task:
+            self.scan_task.cancel()
+        self.status_text = "已停止"
+        self.append_log("[!] 用户手动终止了扫描。")
 
     def append_log(self, text):
-        def _update(dt):
-            formatted_text = f"{text}\n"
-            self.logs.append(formatted_text)
-            if self.current_tab == "log":
-                self.text_display.text += formatted_text
-        Clock.schedule_once(_update)
+        self.log_content += text + "\n"
 
-    def add_result(self, ip, port, latency):
-        def _update(dt):
-            res_line = f"{ip:<15} | {port:<5} | {latency}ms\n"
-            self.results.append(res_line)
-            if self.current_tab == "result":
-                self.text_display.text += res_line
-        Clock.schedule_once(_update)
 
-    def start_scan(self, mode):
-        self.stop_event.clear()
-        self.logs.clear()
-        self.results.clear()
-        self.text_display.text = ""
-        
-        self.btn_v4.disabled = True
-        self.btn_v6.disabled = True
-        self.btn_stop.disabled = False
-        self.lbl_status.text = f"扫描中 ({mode.upper()})..."
+class CyberScannerApp(App):
+    def build(self):
+        self.title = "CloudFlare CyberScanner"
+        return MainUI()
 
-        threading.Thread(target=self._scan_worker, args=(mode,), daemon=True).start()
 
-    def stop_scan(self, instance):
-        self.stop_event.set()
-        self.append_log("[!] 正在停止...")
-
-    def _scan_worker(self, mode):
-        try:
-            port = int(self.input_port.text or 443)
-            max_threads = max(1, min(int(self.input_threads.text or 15), 20))
-            max_latency = int(self.input_max_latency.text or 300)
-
-            test_ips = [f"104.16.{i}.{j}" for i in range(1, 3) for j in range(1, 15)]
-
-            self.append_log(f"开始测试 {len(test_ips)} 个 IP，并发线程数: {max_threads}")
-
-            with ThreadPoolExecutor(max_workers=max_threads) as executor:
-                for ip in test_ips:
-                    if self.stop_event.is_set():
-                        break
-                    executor.submit(self._tcp_ping, ip, port, max_latency)
-                    time.sleep(0.02)
-
-        except Exception as e:
-            self.append_log(f"[!] 异常: {e}")
-        finally:
-            Clock.schedule_once(self._reset_ui)
-
-    def _tcp_ping(self, ip, port, max_latency):
-        if self.stop_event.is_set():
-            return
-        
-        s = None
-        start = time.time()
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(max_latency / 1000.0)
-            s.connect((ip, port))
-            latency = int((time.time() - start) * 1000)
-            self.append_log(f"[+] {ip}:{port} - {latency}ms")
-            self.add_result(ip, port, latency)
-        except Exception:
-            pass
-        finally:
-            if s:
-                try:
-                    s.close()
-                except Exception:
-                    pass
-
-    def _reset_ui(self, dt):
-        self.btn_v4.disabled = False
-        self.btn_v6.disabled = False
-        self.btn_stop.disabled = True
-        self.lbl_status.text = "已完成"
-        self.append_log(f"扫描结束，共获取 {len(self.results)} 个可用节点。")
-
-    def export_results(self, instance):
-        if not self.results:
-            self.append_log("[!] 无结果")
-            return
-        
-        content = "".join(self.results)
-        try:
-            Clipboard.copy(content)
-            self.append_log("[✓] 结果已复制到剪贴板！")
-        except Exception:
-            self.append_log("[!] 剪贴板不可用")
-
-if __name__ == "__main__":
-    CloudFlareScaniOSApp().run()
+if __name__ == '__main__':
+    CyberScannerApp().run()
