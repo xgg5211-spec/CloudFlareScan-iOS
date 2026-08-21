@@ -1,3 +1,4 @@
+import gc
 import glob
 import ipaddress
 import json
@@ -24,7 +25,7 @@ from kivy.uix.popup import Popup
 from kivy.uix.spinner import Spinner
 from kivy.uix.textinput import TextInput
 
-# ==================== 1. iOS 中文字体自动修复 (解决口口乱码) ====================
+# ==================== 1. iOS 中文字体自动修复 ====================
 def init_ios_cjk_font():
     font_candidates = [
         "/System/Library/Fonts/LanguageSupport/PingFang.ttc",
@@ -51,13 +52,12 @@ def init_ios_cjk_font():
         try:
             LabelBase.register(name=DEFAULT_FONT, fn_regular=chosen_font)
             LabelBase.register(name="Roboto", fn_regular=chosen_font)
-            print(f"[FontManager] 成功加载 iOS 中文字体: {chosen_font}")
         except Exception as e:
             print(f"[FontManager] 注册字体失败: {e}")
 
 init_ios_cjk_font()
 
-# ==================== 2. 内置 Cloudflare 全量 & 优选 IP 数据库 ====================
+# ==================== 2. 内置 IP 库与超强万能正则解析器 ====================
 BUILTIN_IPV4_OFFICIAL = [
     "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22",
     "141.101.64.0/18", "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20",
@@ -76,7 +76,6 @@ BUILTIN_IPV6_OFFICIAL = [
     "2405:b500::/32", "2405:8100::/32", "2a06:98c0::/29", "2c0f:f248::/32"
 ]
 
-# Cloudflare 机场数据中心与国家地区映射表
 COLO_MAP = {
     'HKG': '🇭🇰 香港',
     'NRT': '🇯🇵 东京', 'HND': '🇯🇵 羽田', 'KIX': '🇯🇵 大阪',
@@ -89,10 +88,10 @@ COLO_MAP = {
 }
 
 def mask_ip_addr(ip_str):
-    """IP 隐藏遮罩算法：例如 104.16.123.45 -> 104.16.***.***"""
-    if not ip_str:
-        return ""
-    if ":" in ip_str:  # IPv6
+    """IP 隐藏脱敏算法：104.16.123.45 -> 104.16.***.***"""
+    if not ip_str or ip_str == "未知":
+        return "未知"
+    if ":" in ip_str and not ip_str.startswith("http"):  # IPv6
         parts = ip_str.split(":")
         if len(parts) >= 4:
             return f"{parts[0]}:{parts[1]}:****:****"
@@ -102,7 +101,41 @@ def mask_ip_addr(ip_str):
         return f"{parts[0]}.{parts[1]}.***.***"
     return ip_str
 
-# ==================== 3. 赛博朋克自适应 UI 布局定义 ====================
+def robust_ip_parser(text):
+    """万能 IP/CIDR 解析引擎：彻底解决自定义 IP 解析失败问题"""
+    found_ips = set()
+    if not text:
+        return []
+
+    # 清理常见的包裹字符与引号
+    text = text.replace('"', '').replace("'", "").replace('[', '').replace(']', '')
+
+    # 1. 匹配标准 CIDR 网段 (例: 104.16.0.0/13)
+    cidr_matches = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}\b', text)
+    for cidr in cidr_matches:
+        try:
+            net = ipaddress.ip_network(cidr, strict=False)
+            hosts = list(net.hosts())
+            if hosts:
+                sample_size = min(len(hosts), 25)
+                found_ips.update([str(ip) for ip in random.sample(hosts, sample_size)])
+        except Exception:
+            pass
+
+    # 2. 匹配标准单 IPv4 (包含带端口形式 如 104.16.1.1:443)
+    ip_matches = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?\b', text)
+    for item in ip_matches:
+        ip_only = item.split(':')[0] if ':' in item else item
+        try:
+            ip_obj = ipaddress.ip_address(ip_only)
+            if not ip_obj.is_private and not ip_obj.is_multicast:
+                found_ips.add(ip_only)
+        except Exception:
+            pass
+
+    return list(found_ips)
+
+# ==================== 3. 赛博朋克 UI 界面定义 ====================
 KV_STYLE = """
 #:kivy 2.0.0
 
@@ -157,6 +190,26 @@ KV_STYLE = """
             size: self.size
             radius: [dp(6),]
 
+<RegionBtn@Button>:
+    background_normal: ''
+    background_color: 0, 0, 0, 0
+    font_size: '10sp'
+    bold: True
+    is_selected: False
+    color: (255/255, 0/255, 136/255, 1) if self.is_selected else (170/255, 185/255, 200/255, 1)
+    canvas.before:
+        Color:
+            rgba: (255/255, 0/255, 136/255, 0.9) if self.is_selected else (40/255, 55/255, 75/255, 0.6)
+        Line:
+            rounded_rectangle: (self.x, self.y, self.width, self.height, dp(4))
+            width: 1
+        Color:
+            rgba: (22/255, 30/255, 45/255, 0.95)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(4),]
+
 <MainUI>:
     canvas.before:
         Color:
@@ -167,15 +220,15 @@ KV_STYLE = """
 
     BoxLayout:
         orientation: 'vertical'
-        padding: [dp(10), dp(28), dp(10), dp(10)]  # 顶部增加 28dp iOS 刘海/灵动岛避让安全边距
-        spacing: dp(6)
+        padding: [dp(10), dp(28), dp(10), dp(8)]  # iOS 刘海屏 / 灵动岛顶部 28dp 避让
+        spacing: dp(5)
 
-        # 1. 顶栏：标题与状态
+        # 1. 标题与状态栏
         BoxLayout:
             size_hint_y: None
-            height: dp(26)
+            height: dp(24)
             Label:
-                text: "[b][color=00f3ff]CLOUDFLARE[/color] [color=ff0055]SCANNER[/color] [color=888888]v4.0[/color][/b]"
+                text: "[b][color=00f3ff]CLOUDFLARE[/color] [color=ff0055]SCANNER[/color] [color=888888]v4.1[/color][/b]"
                 markup: True
                 font_size: '15sp'
                 halign: 'left'
@@ -190,10 +243,10 @@ KV_STYLE = """
                 text_size: self.size
                 valign: 'middle'
 
-        # 2. 本地运营商 & 出口 IP 看板
+        # 2. 本地运营商 & 出口 IP 看板 (联动隐私隐藏)
         BoxLayout:
             size_hint_y: None
-            height: dp(28)
+            height: dp(26)
             canvas.before:
                 Color:
                     rgba: (20/255, 30/255, 45/255, 0.85)
@@ -211,12 +264,11 @@ KV_STYLE = """
                 text_size: self.size
                 valign: 'middle'
                 shorten: True
-                shorten_from: 'right'
 
-        # 3. 数据仪表盘 (4卡片)
+        # 3. 统计看板 (4卡片)
         BoxLayout:
             size_hint_y: None
-            height: dp(42)
+            height: dp(40)
             spacing: dp(5)
 
             StatCard:
@@ -239,17 +291,17 @@ KV_STYLE = """
                 value: root.max_speed_text
                 value_color: (255/255, 0/255, 136/255, 1)
 
-        # 4. 配置选项一 (端口 + IP库来源 + 地区选择)
+        # 4. 选项一: 端口选择 (含自适应端口) + IP 库选择
         BoxLayout:
             size_hint_y: None
-            height: dp(30)
-            spacing: dp(4)
+            height: dp(28)
+            spacing: dp(6)
 
             Spinner:
                 id: port_spinner
                 text: '443 (HTTPS)'
-                values: ['443 (HTTPS)', '8443 (HTTPS)', '2053 (HTTPS)', '2083 (HTTPS)', '80 (HTTP)', '8080 (HTTP)']
-                size_hint_x: 0.33
+                values: ['443 (HTTPS)', '⚡ 自适应端口', '8443 (HTTPS)', '2053 (HTTPS)', '2083 (HTTPS)', '80 (HTTP)', '8080 (HTTP)']
+                size_hint_x: 0.45
                 font_size: '10sp'
                 background_color: (20/255, 30/255, 45/255, 1)
                 color: (0/255, 243/255, 255/255, 1)
@@ -258,37 +310,61 @@ KV_STYLE = """
                 id: source_spinner
                 text: '亚太优选 库'
                 values: ['亚太优选 库', '官方 IPv4 库', '官方 IPv6 库', '在线订阅URL', '剪贴板自定义']
-                size_hint_x: 0.35
+                size_hint_x: 0.55
                 font_size: '10sp'
                 background_color: (20/255, 30/255, 45/255, 1)
                 color: (0/255, 255/255, 136/255, 1)
                 on_text: root.on_source_change(self.text)
 
-            Spinner:
-                id: region_spinner
-                text: '全部分区'
-                values: ['全部分区', '🇭🇰 香港', '🇯🇵 日本', '🇸🇬 新加坡', '🇺🇸 美国', '🌐 其他地区']
-                size_hint_x: 0.32
-                font_size: '10sp'
-                background_color: (20/255, 30/255, 45/255, 1)
-                color: (255/255, 204/255, 0/255, 1)
-
-        # 5. IP/CIDR 输入与编辑框
+        # 5. 国家/地区选择 专属按钮栏
         BoxLayout:
-            orientation: 'vertical'
-            size_hint_y: 0.22
-            spacing: dp(3)
+            size_hint_y: None
+            height: dp(26)
+            spacing: dp(4)
 
+            RegionBtn:
+                text: "🌐 全部"
+                is_selected: root.selected_region == "ALL"
+                on_release: root.select_region("ALL")
+
+            RegionBtn:
+                text: "🇭🇰 香港"
+                is_selected: root.selected_region == "HK"
+                on_release: root.select_region("HK")
+
+            RegionBtn:
+                text: "🇯🇵 日本"
+                is_selected: root.selected_region == "JP"
+                on_release: root.select_region("JP")
+
+            RegionBtn:
+                text: "🇸🇬 新加坡"
+                is_selected: root.selected_region == "SG"
+                on_release: root.select_region("SG")
+
+            RegionBtn:
+                text: "🇺🇸 美国"
+                is_selected: root.selected_region == "US"
+                on_release: root.select_region("US")
+
+            RegionBtn:
+                text: "🌐 其他"
+                is_selected: root.selected_region == "OTHER"
+                on_release: root.select_region("OTHER")
+
+        # 6. IP 编辑框
+        BoxLayout:
+            size_hint_y: 0.20
             TextInput:
                 id: ip_input
-                hint_text: "点击 [获取/刷新 IP库] 秒载内置库，或在此粘贴自定义 CIDR / IP..."
+                hint_text: "点击 [刷新 IP 库] 载入内置库，或在此粘贴自定义 CIDR / IP 列表..."
                 background_color: (15/255, 20/255, 28/255, 1)
                 foreground_color: (0/255, 243/255, 255/255, 1)
                 cursor_color: (255/255, 0/255, 85/255, 1)
                 font_size: '10sp'
                 padding: [dp(6), dp(6)]
 
-        # 6. 控制按钮栏 (支持 IP 隐藏脱敏开关)
+        # 7. 控制按钮栏
         BoxLayout:
             size_hint_y: None
             height: dp(32)
@@ -310,35 +386,29 @@ KV_STYLE = """
                 text: "📤 导出节点"
                 on_release: root.export_proxy_config()
 
-        # 7. 环形终端日志视窗 (防 OpenGL 显存溢出)
+        # 8. 环形终端日志视窗 (限制 30 行，彻底解决黑屏 & 显存溢出闪退)
         BoxLayout:
             orientation: 'vertical'
-            ScrollView:
-                id: scroller
-                bar_width: dp(3)
-                bar_color: (0/255, 243/255, 255/255, 0.6)
-                canvas.before:
-                    Color:
-                        rgba: (8/255, 11/255, 16/255, 0.95)
-                    Rectangle:
-                        pos: self.pos
-                        size: self.size
-                    Color:
-                        rgba: (0/255, 243/255, 255/255, 0.2)
-                    Line:
-                        rounded_rectangle: (self.x, self.y, self.width, self.height, dp(6))
-                        width: 1
-                Label:
-                    id: log_label
-                    text: root.log_content
-                    markup: True
-                    font_size: '10sp'
-                    size_hint_y: None
-                    height: self.texture_size[1]
-                    text_size: self.width - dp(10), None
-                    padding: [dp(5), dp(5)]
-                    halign: 'left'
-                    valign: 'top'
+            canvas.before:
+                Color:
+                    rgba: (8/255, 11/255, 16/255, 0.95)
+                Rectangle:
+                    pos: self.pos
+                    size: self.size
+                Color:
+                    rgba: (0/255, 243/255, 255/255, 0.2)
+                Line:
+                    rounded_rectangle: (self.x, self.y, self.width, self.height, dp(6))
+                    width: 1
+            Label:
+                id: log_label
+                text: root.log_content
+                markup: True
+                font_size: '10sp'
+                padding: [dp(6), dp(6)]
+                halign: 'left'
+                valign: 'top'
+                text_size: self.size
 """
 
 Builder.load_string(KV_STYLE)
@@ -347,12 +417,13 @@ Builder.load_string(KV_STYLE)
 class MainUI(BoxLayout):
     status_text = StringProperty("系统就绪")
     isp_info_text = StringProperty("🔍 正在识别本地运营商与出口 IP...")
-    log_content = StringProperty("[color=00f3ff]=== Cloudflare CyberScanner v4.0 (终极稳定版) ===[/color]\n• 已替换为多线程底层 Socket，彻底绝杀 iOS 闪退\n• 内置全量/亚太优选 IP 库，秒级加载，离线无忧\n• 支持 TLS 真实加密握手 + 节点国家/数据中心自动识别\n• 支持 IP 隐私遮罩脱敏模式，截图分享不露 IP\n")
+    log_content = StringProperty("[color=00f3ff]=== Cloudflare CyberScanner v4.1 (轻量安定版) ===[/color]\n• 已修复 OpenGL 纹理超限导致的黑屏与随机闪退\n• 支持自定义 IP 升级版万能解析\n• 支持【自适应端口】与【国家国旗快速筛选】\n")
     is_scanning = BooleanProperty(False)
     is_ip_masked = BooleanProperty(False)
     mask_button_text = StringProperty("🙈 IP 遮罩: 关")
+    selected_region = StringProperty("ALL")
 
-    # 数据看板
+    # 统计数据
     scanned_count = NumericProperty(0)
     total_count = NumericProperty(0)
     valid_count = NumericProperty(0)
@@ -362,74 +433,75 @@ class MainUI(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.stop_requested = False
-        self.best_ips = []  # 存储测速结果
-        self.ui_log_buffer = []
-        self.raw_log_lines = self.log_content.splitlines()
+        self.best_ips = []
+        self.display_log_lines = self.log_content.splitlines()
 
-        # UI 节流刷新定时器，防止高并发假死
-        Clock.schedule_interval(self._flush_ui_log_buffer, 0.15)
-        
-        # 默认自动加载亚太优选库，并异步识别本地 ISP
+        # 本地网络信息缓存
+        self.raw_public_ip = "未知"
+        self.raw_isp_name = "未知"
+        self.raw_city = ""
+
+        # UI 刷新定时器
         Clock.schedule_once(lambda dt: self.load_current_source_ip(), 0.2)
         Clock.schedule_once(lambda dt: self.detect_isp_info(), 0.5)
 
+    # ---------------- 1. 安全日志输出 (严格保持 30 行，彻底防黑屏) ----------------
     def append_log(self, text):
-        self.ui_log_buffer.append(text)
+        self.display_log_lines.append(text)
+        if len(self.display_log_lines) > 30:  # 限制最大 30 行，保障 OpenGL 纹理高度绝对安全
+            self.display_log_lines = self.display_log_lines[-30:]
+        self.log_content = "\n".join(self.display_log_lines)
 
-    def _flush_ui_log_buffer(self, dt):
-        """环形日志：固定最新 150 行，保护内存与 GPU 显存"""
-        if self.ui_log_buffer:
-            self.raw_log_lines.extend(self.ui_log_buffer)
-            self.ui_log_buffer.clear()
+    # ---------------- 2. 地区筛选按钮切换 ----------------
+    def select_region(self, region_code):
+        self.selected_region = region_code
+        names = {"ALL": "全部分区", "HK": "🇭🇰 香港", "JP": "🇯🇵 日本", "SG": "🇸🇬 新加坡", "US": "🇺🇸 美国", "OTHER": "🌐 其他地区"}
+        self.append_log(f"[🌐 筛选] 已切换地区过滤目标为: [color=ff0088]{names.get(region_code)}[/color]")
 
-            if len(self.raw_log_lines) > 150:
-                self.raw_log_lines = self.raw_log_lines[-150:]
-
-            self.log_content = "\n".join(self.raw_log_lines) + "\n"
-            if hasattr(self.ids, 'scroller'):
-                self.ids.scroller.scroll_y = 0
-
-    # ---------------- 1. 隐藏 IP 隐私脱敏开关 ----------------
+    # ---------------- 3. 隐私遮罩开关 (联动顶部公网 IP) ----------------
     def toggle_ip_mask(self):
         self.is_ip_masked = not self.is_ip_masked
         if self.is_ip_masked:
             self.mask_button_text = "🙈 IP 遮罩: 开"
-            self.append_log("[🔒 隐私] 已开启 IP 遮罩模式，所有 IP 将模糊显示 (104.16.***.***)。")
+            self.append_log("[🔒 隐私] 已开启 IP 隐私遮罩，所有 IP 将模糊显示。")
         else:
             self.mask_button_text = "🙈 IP 遮罩: 关"
-            self.append_log("[🔓 隐私] 已关闭 IP 遮罩模式，显示完整 IP 地址。")
+            self.append_log("[🔓 隐私] 已关闭 IP 隐私遮罩。")
 
-    # ---------------- 2. 运营商与公网 IP 识别 ----------------
+        self.update_isp_display()
+
+    def update_isp_display(self):
+        display_ip = mask_ip_addr(self.raw_public_ip) if self.is_ip_masked else self.raw_public_ip
+        city_str = f" ({self.raw_city})" if self.raw_city else ""
+        self.isp_info_text = f"🌐 运营商: [color=00ff88]{self.raw_isp_name}[/color]  公网IP: [color=00f3ff]{display_ip}[/color]{city_str}"
+
+    # ---------------- 4. 运营商与公网 IP 识别 ----------------
     def detect_isp_info(self):
         threading.Thread(target=self._detect_isp_worker, daemon=True).start()
 
     def _detect_isp_worker(self):
-        isp_text = "🌐 本地网络: 直连 / 未知运营商"
         try:
             req = urllib.request.Request("http://ip-api.com/json/?lang=zh-CN", headers={'User-Agent': 'Mozilla/5.0'})
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read().decode('utf-8'))
-                ip = data.get('query', '未知')
-                display_ip = mask_ip_addr(ip) if self.is_ip_masked else ip
+                self.raw_public_ip = data.get('query', '未知')
                 isp = data.get('isp', data.get('org', '未知'))
-                city = data.get('city', '')
+                self.raw_city = data.get('city', '')
 
                 if "Telecom" in isp or "电信" in isp:
-                    isp_name = "中国电信"
+                    self.raw_isp_name = "中国电信"
                 elif "Unicom" in isp or "联通" in isp:
-                    isp_name = "中国联通"
+                    self.raw_isp_name = "中国联通"
                 elif "Mobile" in isp or "移动" in isp:
-                    isp_name = "中国移动"
+                    self.raw_isp_name = "中国移动"
                 else:
-                    isp_name = isp
-
-                isp_text = f"🌐 运营商: [color=00ff88]{isp_name}[/color]  公网IP: [color=00f3ff]{display_ip}[/color] ({city})"
+                    self.raw_isp_name = isp
         except Exception:
             pass
 
-        Clock.schedule_once(lambda dt: setattr(self, 'isp_info_text', isp_text))
+        Clock.schedule_once(lambda dt: self.update_isp_display())
 
-    # ---------------- 3. 内置 IP 库秒级加载 ----------------
+    # ---------------- 5. IP 库切换与拉取 ----------------
     def on_source_change(self, source_name):
         self.load_current_source_ip(source_name)
 
@@ -440,26 +512,25 @@ class MainUI(BoxLayout):
         if source_name == "亚太优选 库":
             self.ids.ip_input.text = "\n".join(BUILTIN_APAC_PREFERRED)
             self.status_text = f"已载入 {len(BUILTIN_APAC_PREFERRED)} 网段"
-            self.append_log(f"[✓] [color=00ff88]已秒级载入 {len(BUILTIN_APAC_PREFERRED)} 个内置【亚太优选 IP 网段】！[/color]")
+            self.append_log(f"[✓] 已载入 {len(BUILTIN_APAC_PREFERRED)} 个内置【亚太优选 IP 网段】")
 
         elif source_name == "官方 IPv4 库":
             self.ids.ip_input.text = "\n".join(BUILTIN_IPV4_OFFICIAL)
             self.status_text = f"已载入 {len(BUILTIN_IPV4_OFFICIAL)} 网段"
-            self.append_log(f"[✓] [color=00ff88]已秒级载入 {len(BUILTIN_IPV4_OFFICIAL)} 个内置【官方 IPv4 网段】！[/color]")
+            self.append_log(f"[✓] 已载入 {len(BUILTIN_IPV4_OFFICIAL)} 个内置【官方 IPv4 网段】")
 
         elif source_name == "官方 IPv6 库":
             self.ids.ip_input.text = "\n".join(BUILTIN_IPV6_OFFICIAL)
             self.status_text = f"已载入 {len(BUILTIN_IPV6_OFFICIAL)} 网段"
-            self.append_log(f"[✓] [color=00ff88]已秒级载入 {len(BUILTIN_IPV6_OFFICIAL)} 个内置【官方 IPv6 网段】！[/color]")
+            self.append_log(f"[✓] 已载入 {len(BUILTIN_IPV6_OFFICIAL)} 个内置【官方 IPv6 网段】")
 
         elif source_name == "剪贴板自定义":
             text = Clipboard.paste()
             if text and text.strip():
                 self.ids.ip_input.text = text.strip()
-                lines = [l for l in text.splitlines() if l.strip()]
-                self.append_log(f"[✓] [color=00ff88]成功从剪贴板载入 {len(lines)} 行自定义 IP/CIDR！[/color]")
+                self.append_log(f"[✓] 已成功粘贴剪贴板文本！")
             else:
-                self.append_log("[!] 剪贴板为空，请先复制 IP / CIDR 网段。")
+                self.append_log("[!] 剪贴板为空。")
 
         elif source_name == "在线订阅URL":
             self.show_url_import_dialog()
@@ -468,7 +539,7 @@ class MainUI(BoxLayout):
         content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(8))
         url_input = TextInput(
             text="https://raw.githubusercontent.com/ip-thailand/cloudflare-ip/main/cloudflare-ipv4.txt",
-            hint_text="输入订阅 / TXT 文件 URL 链接",
+            hint_text="输入 TXT / 订阅 URL 链接",
             multiline=False, size_hint_y=None, height=dp(38), font_size='11sp'
         )
         btn_box = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(10))
@@ -485,8 +556,8 @@ class MainUI(BoxLayout):
             url = url_input.text.strip()
             if url:
                 popup.dismiss()
-                self.status_text = "下载 IP 库..."
-                self.append_log(f"[+] 正在拉取: {url}")
+                self.status_text = "下载中..."
+                self.append_log(f"[+] 拉取在线 IP 库: {url}")
                 threading.Thread(target=self._fetch_url_worker, args=(url,), daemon=True).start()
 
         btn_confirm.bind(on_release=on_confirm)
@@ -501,17 +572,15 @@ class MainUI(BoxLayout):
             ctx.verify_mode = ssl.CERT_NONE
             with urllib.request.urlopen(req, context=ctx, timeout=7) as response:
                 content = response.read().decode('utf-8')
-                lines = [line.strip() for line in content.splitlines() if line.strip() and not line.startswith('#')]
-                Clock.schedule_once(lambda dt: self._on_ip_fetch_success(lines))
+                Clock.schedule_once(lambda dt: self._on_ip_fetch_success(content))
         except Exception as e:
-            Clock.schedule_once(lambda dt: self.append_log(f"[X] 拉取失败: {e}，建议直接使用内置优选库。"))
+            Clock.schedule_once(lambda dt: self.append_log(f"[X] 拉取失败: {e}"))
 
-    def _on_ip_fetch_success(self, lines):
-        self.ids.ip_input.text = "\n".join(lines)
-        self.status_text = f"已加载 {len(lines)} 条"
-        self.append_log(f"[✓] [color=00ff88]成功在线获取 {len(lines)} 个 IP 网段！[/color]")
+    def _on_ip_fetch_success(self, content):
+        self.ids.ip_input.text = content
+        self.append_log("[✓] 在线 IP 库拉取成功！已填入输入框。")
 
-    # ---------------- 4. 多线程纯底层 TLS 握手测速引擎 (100% 不闪退) ----------------
+    # ---------------- 6. 多线程纯 Socket 测速引擎 (受控 8 线程，防闪退) ----------------
     def toggle_scan(self):
         if self.is_scanning:
             self.stop_scan()
@@ -521,162 +590,152 @@ class MainUI(BoxLayout):
     def start_scan(self):
         raw_text = self.ids.ip_input.text.strip()
         if not raw_text:
-            self.append_log("[!] 请先选择或载入 IP 网段。")
+            self.append_log("[!] 请先选择或输入 IP 网段。")
+            return
+
+        # 使用万能解析器解析 IP
+        parsed_ips = robust_ip_parser(raw_text)
+        if not parsed_ips:
+            self.append_log("[!] 未能解析到可用 IP，请检查格式。")
             return
 
         self.is_scanning = True
         self.stop_requested = False
-        self.status_text = "解析 IP 中..."
+        self.status_text = "测速中..."
         self.scanned_count = 0
         self.valid_count = 0
         self.min_latency_text = "-- ms"
         self.max_speed_text = "-- MB/s"
         self.best_ips.clear()
 
-        port_str = self.ids.port_spinner.text.split(' ')[0]
-        port = int(port_str)
-        region_filter = self.ids.region_spinner.text
+        random.shuffle(parsed_ips)
+        target_ips = parsed_ips[:500]  # 500 个样本抽样
+        self.total_count = len(target_ips)
 
-        # 启动后台多线程打散解析，绝不卡死主界面
-        threading.Thread(target=self._parse_ips_worker, args=(raw_text, port, region_filter), daemon=True).start()
+        port_selection = self.ids.port_spinner.text
+        self.append_log(f"[+] 开始对 [color=00f3ff]{len(target_ips)}[/color] 个节点执行 TLS 真实握手测速...")
 
-    def _parse_ips_worker(self, raw_text, port, region_filter):
-        ip_set = set()
-        for line in raw_text.splitlines():
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            try:
-                if '/' in line:
-                    net = ipaddress.ip_network(line, strict=False)
-                    hosts = list(net.hosts())
-                    sample_size = min(len(hosts), 30)  # 高效离散采样
-                    if sample_size > 0:
-                        ip_set.update([str(ip) for ip in random.sample(hosts, sample_size)])
-                else:
-                    ip_set.add(str(ipaddress.ip_address(line)))
-            except ValueError:
-                continue
+        # 启动后台测速，受控 8 线程并发，保障 iOS 极其稳定
+        threading.Thread(target=self._scan_runner, args=(target_ips, port_selection), daemon=True).start()
 
-        final_ips = list(ip_set)
-        random.shuffle(final_ips)
-        final_ips = final_ips[:800]  # 抽取 800 个黄金样本 IP
-
-        Clock.schedule_once(lambda dt: self._start_thread_ping(final_ips, port, region_filter))
-
-    def _start_thread_ping(self, ip_list, port, region_filter):
-        if not ip_list:
-            self.append_log("[!] 未解析到可用的有效 IP。")
-            self.is_scanning = False
-            self.status_text = "就绪"
-            return
-
-        self.total_count = len(ip_list)
-        self.status_text = "TLS 握手测速中..."
-        self.append_log(f"[+] 开始对 [color=00f3ff]{len(ip_list)}[/color] 个节点执行真实 TLS 加密握手...")
-
-        # 后台驱动并发扫描线程，彻底绝杀 asyncio 引起的崩溃
-        threading.Thread(target=self._scan_runner, args=(ip_list, port, region_filter), daemon=True).start()
-
-    def _test_single_tls_ip(self, ip, port):
-        """核心：100% 真实 SSL/TLS 握手 + 自动解析 Cloudflare 机房 Colo 代码"""
+    def _test_single_ip(self, ip, port_selection):
+        """单 IP SSL/TLS 握手 + 自适应端口探测"""
         if self.stop_requested:
-            return ip, None, "已停止"
+            return ip, None, "已停止", 443
 
-        is_ssl = port in [443, 8443, 2053, 2083]
-        s = socket.socket(socket.AF_INET if ":" not in ip else socket.AF_INET6, socket.SOCK_STREAM)
-        s.settimeout(1.3)  # 严格 1.3 秒超时保护
-        start_t = time.perf_counter()
-        colo_str = "未知"
+        # 确定需要探测的端口列表
+        if "自适应" in port_selection:
+            test_ports = [443, 8443, 2053, 80]
+        else:
+            p = int(port_selection.split(' ')[0])
+            test_ports = [p]
 
-        try:
-            if is_ssl:
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
-                tls_sock = ctx.wrap_socket(s, server_hostname="speed.cloudflare.com")
-                tls_sock.connect((ip, port))
-                latency = round((time.perf_counter() - start_t) * 1000, 1)
+        for port in test_ports:
+            if self.stop_requested:
+                break
+            is_ssl = port in [443, 8443, 2053, 2083]
+            s = socket.socket(socket.AF_INET if ":" not in ip else socket.AF_INET6, socket.SOCK_STREAM)
+            s.settimeout(1.2)  # 1.2 秒严格超时限制，防阻塞
+            start_t = time.perf_counter()
+            colo_str = "未知"
 
-                # 探测 Cloudflare 机房 /cdn-cgi/trace
-                try:
-                    req = "GET /cdn-cgi/trace HTTP/1.1\r\nHost: speed.cloudflare.com\r\nUser-Agent: Mozilla/5.0\r\nConnection: close\r\n\r\n"
-                    tls_sock.sendall(req.encode('utf-8'))
-                    resp = tls_sock.recv(1024)
-                    text = resp.decode('utf-8', errors='ignore')
-                    match = re.search(r'colo=([A-Z]{3})', text)
-                    if match:
-                        raw_colo = match.group(1).upper()
-                        colo_str = COLO_MAP.get(raw_colo, f"🌐 {raw_colo}")
-                except Exception:
-                    pass
-                tls_sock.close()
-            else:
-                s.connect((ip, port))
-                latency = round((time.perf_counter() - start_t) * 1000, 1)
-                s.close()
-
-            return ip, latency, colo_str
-        except Exception:
-            return ip, None, "超时"
-        finally:
             try:
-                s.close()
+                if is_ssl:
+                    ctx = ssl.create_default_context()
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                    tls_sock = ctx.wrap_socket(s, server_hostname="speed.cloudflare.com")
+                    tls_sock.connect((ip, port))
+                    latency = round((time.perf_counter() - start_t) * 1000, 1)
+
+                    try:
+                        req = "GET /cdn-cgi/trace HTTP/1.1\r\nHost: speed.cloudflare.com\r\nUser-Agent: Mozilla/5.0\r\nConnection: close\r\n\r\n"
+                        tls_sock.sendall(req.encode('utf-8'))
+                        resp = tls_sock.recv(1024)
+                        text = resp.decode('utf-8', errors='ignore')
+                        match = re.search(r'colo=([A-Z]{3})', text)
+                        if match:
+                            raw_colo = match.group(1).upper()
+                            colo_str = COLO_MAP.get(raw_colo, f"🌐 {raw_colo}")
+                    except Exception:
+                        pass
+                    tls_sock.close()
+                else:
+                    s.connect((ip, port))
+                    latency = round((time.perf_counter() - start_t) * 1000, 1)
+                    s.close()
+
+                return ip, latency, colo_str, port
             except Exception:
                 pass
+            finally:
+                try:
+                    s.close()
+                except Exception:
+                    pass
 
-    def _scan_runner(self, ip_list, port, region_filter):
-        # 16 线程受控并发，防 iOS 句柄超限
-        with ThreadPoolExecutor(max_workers=16) as pool:
-            futures = [pool.submit(self._test_single_tls_ip, ip, port) for ip in ip_list]
+        return ip, None, "超时", 443
+
+    def _scan_runner(self, ip_list, port_selection):
+        # 使用 8 线程并发，极其稳定，杜绝句柄泄露
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = [pool.submit(self._test_single_ip, ip, port_selection) for ip in ip_list]
             for future in futures:
                 if self.stop_requested:
                     break
-                ip, latency, colo = future.result()
+                ip, latency, colo, used_port = future.result()
+                Clock.schedule_once(lambda dt, i=ip, l=latency, c=colo, p=used_port: self._on_single_result(i, l, c, p))
 
-                # 主线程安全的更新 UI
-                Clock.schedule_once(lambda dt, i=ip, l=latency, c=colo: self._on_single_result(i, l, c, region_filter))
-
-        # 完成后对 TOP 节点发起真实 HTTP 下载速度测量
+        # 完成后对前 3 名进行下载测速
         if self.best_ips and not self.stop_requested:
-            Clock.schedule_once(lambda dt: self.append_log("\n[+] 正在对最快节点发起 [color=ff0088]3MB HTTP 真实下载速度测试[/color]..."))
+            Clock.schedule_once(lambda dt: self.append_log("[+] 发起 [color=ff0088]HTTP 真实下载速度测试[/color]..."))
             top_3 = sorted(self.best_ips, key=lambda x: x['latency'])[:3]
             for item in top_3:
                 if self.stop_requested:
                     break
-                speed = self._test_download_speed_sync(item['ip'], port)
+                speed = self._test_download_speed_sync(item['ip'], item['port'])
                 item['speed'] = speed
                 display_ip = mask_ip_addr(item['ip']) if self.is_ip_masked else item['ip']
                 if speed > 0:
-                    Clock.schedule_once(lambda dt, dip=display_ip, spd=speed: self.append_log(f"[🚀 测速] IP: {dip:<15} 实测速度: [color=ff0088]{spd} MB/s[/color]"))
+                    Clock.schedule_once(lambda dt, dip=display_ip, spd=speed: self.append_log(f"[🚀 测速] {dip:<15} 速度: [color=ff0088]{spd} MB/s[/color]"))
 
             max_s = max(x['speed'] for x in self.best_ips)
             if max_s > 0:
                 Clock.schedule_once(lambda dt, ms=max_s: setattr(self, 'max_speed_text', f"{ms} MB/s"))
 
-        # 汇总榜单
         Clock.schedule_once(lambda dt: self._finish_scan())
 
-    def _on_single_result(self, ip, latency, colo, region_filter):
+    def _on_single_result(self, ip, latency, colo, used_port):
         self.scanned_count += 1
         if latency is not None:
-            # 根据用户选择的地区过滤
-            if region_filter != "全部分区":
-                if region_filter[:2] not in colo and region_filter[3:] not in colo:
-                    return
+            # 地区筛选逻辑
+            region_ok = False
+            if self.selected_region == "ALL":
+                region_ok = True
+            elif self.selected_region == "HK" and "香港" in colo:
+                region_ok = True
+            elif self.selected_region == "JP" and ("东京" in colo or "大阪" in colo or "羽田" in colo):
+                region_ok = True
+            elif self.selected_region == "SG" and "新加坡" in colo:
+                region_ok = True
+            elif self.selected_region == "US" and ("洛杉矶" in colo or "圣何塞" in colo or "西雅图" in colo or "旧金山" in colo or "芝加哥" in colo or "纽约" in colo):
+                region_ok = True
+            elif self.selected_region == "OTHER" and not any(k in colo for k in ["香港", "东京", "大阪", "羽田", "新加坡", "洛杉矶", "圣何塞"]):
+                region_ok = True
 
-            self.valid_count += 1
-            self.best_ips.append({'ip': ip, 'latency': latency, 'colo': colo, 'speed': 0.0})
+            if region_ok:
+                self.valid_count += 1
+                self.best_ips.append({'ip': ip, 'port': used_port, 'latency': latency, 'colo': colo, 'speed': 0.0})
 
-            color_str = "00ff88" if latency < 120 else ("00f3ff" if latency < 220 else "ffcc00")
-            min_lat = min(x['latency'] for x in self.best_ips)
-            self.min_latency_text = f"{min_lat} ms"
+                color_str = "00ff88" if latency < 120 else ("00f3ff" if latency < 220 else "ffcc00")
+                min_lat = min(x['latency'] for x in self.best_ips)
+                self.min_latency_text = f"{min_lat} ms"
 
-            display_ip = mask_ip_addr(ip) if self.is_ip_masked else ip
-            self.append_log(f"[✓] IP: [color=ffffff]{display_ip:<15}[/color] [{colo}] TLS: [color={color_str}]{latency} ms[/color]")
+                display_ip = mask_ip_addr(ip) if self.is_ip_masked else ip
+                self.append_log(f"[✓] {display_ip:<15} [{colo}] TLS:{latency}ms ({used_port}端口)")
 
     def _test_download_speed_sync(self, ip, port):
-        """同步 socket 拉取测速，准确率 100%"""
+        """拉取 3MB 逻辑计算真实 MB/s"""
         is_ssl = port in [443, 8443, 2053, 2083]
         s = socket.socket(socket.AF_INET if ":" not in ip else socket.AF_INET6, socket.SOCK_STREAM)
         s.settimeout(2.5)
@@ -721,38 +780,55 @@ class MainUI(BoxLayout):
     def _finish_scan(self):
         if self.best_ips:
             self.best_ips.sort(key=lambda x: (x['latency'], -x['speed']))
-            self.append_log("\n[b][color=00ff88]🏆 TOP 5 优选 Cloudflare 节点榜单:[/color][/b]")
+            self.append_log("\n[b][color=00ff88]🏆 TOP 5 优选节点榜单:[/color][/b]")
             for idx, item in enumerate(self.best_ips[:5], start=1):
                 display_ip = mask_ip_addr(item['ip']) if self.is_ip_masked else item['ip']
                 speed_str = f" | {item['speed']} MB/s" if item['speed'] > 0 else ""
-                self.append_log(f"  {idx}. [color=00f3ff]{display_ip:<15}[/color] [{item['colo']}] - [color=00ff88]{item['latency']} ms[/color]{speed_str}")
+                self.append_log(f" {idx}. {display_ip:<15} [{item['colo']}] - {item['latency']}ms ({item['port']}端口){speed_str}")
 
-        self.append_log("\n[✓] [color=00f3ff]全套 TLS 测速与数据中心识别完成！[/color]")
+        self.append_log("\n[✓] [color=00f3ff]测速已完成！[/color]")
         self.is_scanning = False
         self.status_text = "完成"
+        gc.collect()  # 触发垃圾回收
 
-    # ---------------- 5. 导出配置与操作 ----------------
+    # ---------------- 7. 一键导出节点 (弹窗 + 自动复制) ----------------
     def export_proxy_config(self):
-        """一键生成支持 Clash / Shadowrocket 的通用优选 IP 配置"""
         if not self.best_ips:
             self.append_log("[!] 暂无测速数据，请先开始测速。")
             return
 
-        port_str = self.ids.port_spinner.text.split(' ')[0]
-        result_lines = ["# === Cloudflare 优选 IP 节点列表 ==="]
-        for idx, item in enumerate(self.best_ips[:10], start=1):
-            # 导出配置始终使用完整真实 IP
-            result_lines.append(f"{item['ip']}:{port_str}#{idx}_CF_{item['colo']}_{item['latency']}ms")
+        lines = ["# === Cloudflare CyberScanner 优选节点榜单 ==="]
+        lines.append("# 支持 Clash / VLESS / Shadowrocket / Sing-Box\n")
 
-        export_text = "\n".join(result_lines)
-        Clipboard.copy(export_text)
-        self.append_log(f"[✓] [color=00ff88]已生成 TOP 10 优选节点列表并复制到剪贴板！[/color]")
+        lines.append("=== 1. IP:端口 列表 ===")
+        for idx, item in enumerate(self.best_ips[:10], start=1):
+            lines.append(f"{item['ip']}:{item['port']}#{idx}_CF_{item['colo']}_{item['latency']}ms")
+
+        lines.append("\n=== 2. VLESS 示例节点 ===")
+        for idx, item in enumerate(self.best_ips[:10], start=1):
+            vless_uri = f"vless://11111111-2222-3333-4443-555555555555@{item['ip']}:{item['port']}?encryption=none&security=tls&type=ws&host=your-domain.com&path=%2F#CF_{item['colo']}_{item['latency']}ms"
+            lines.append(vless_uri)
+
+        export_text = "\n".join(lines)
+        Clipboard.copy(export_text)  # 自动复制到系统剪贴板
+
+        # 弹窗显示并提供再次复制按钮
+        content = BoxLayout(orientation='vertical', padding=dp(8), spacing=dp(6))
+        text_area = TextInput(text=export_text, readonly=True, font_size='10sp', background_color=(15/255, 20/255, 28/255, 1), foreground_color=(0/255, 243/255, 255/255, 1))
+        btn_copy_close = CyberButton(text="📋 已复制到剪贴板 (点击关闭)", size_hint_y=None, height=dp(34))
+
+        content.add_widget(text_area)
+        content.add_widget(btn_copy_close)
+
+        popup = Popup(title="📤 导出优选节点", content=content, size_hint=(0.9, 0.7))
+        btn_copy_close.bind(on_release=lambda x: (Clipboard.copy(export_text), popup.dismiss()))
+        popup.open()
 
     def stop_scan(self):
         self.stop_requested = True
         self.is_scanning = False
         self.status_text = "已停止"
-        self.append_log("[!] 用户手动终止了测速。")
+        self.append_log("[!] 用户终止了测速。")
 
 
 class CyberScannerApp(App):
