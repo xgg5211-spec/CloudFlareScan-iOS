@@ -11,7 +11,7 @@ on:
 
 jobs:
   build-ipa:
-    runs-on: macos-14 # 使用 Apple Silicon M1/M2 高速 Mac 构建节点
+    runs-on: macos-14
 
     steps:
       - name: Checkout Repository
@@ -30,10 +30,9 @@ jobs:
       - name: Install Kivy-iOS and Build Tools
         run: |
           python -m pip install --upgrade pip
-          pip install "cython<3.0.0" # 保持兼容 iOS toolchain 的 Cython 版本
+          pip install "cython<3.0.0"
           pip install kivy-ios
 
-      # 1. 恢复 Kivy-iOS 编译缓存 (大大缩短后续 Actions 运行时间)
       - name: Restore Kivy-iOS Cache
         uses: actions/cache@v4
         with:
@@ -41,31 +40,29 @@ jobs:
             ~/.kivy-ios
             build
             dist
-          key: ${{ runner.os }}-kivy-ios-v2-${{ hashFiles('**/requirements.txt', '**/main.py') }}
+          key: ${{ runner.os }}-kivy-ios-v3-${{ hashFiles('**/requirements.txt', '**/main.py') }}
           restore-keys: |
-            ${{ runner.os }}-kivy-ios-v2-
+            ${{ runner.os }}-kivy-ios-v3-
 
-      # 2. 编译 Python 基础运行环境及核心 C 拓展 (包含 TLS/SSL 拓展)
+      # 修正：去除了 certifi Recipe（仅保留需底层 C 编译的库）
       - name: Build Kivy-iOS Recipes
         run: |
-          toolchain build python3 kivy openssl certifi
+          toolchain build python3 kivy openssl
 
-      # 3. 为 iOS 环境安装 Python 异步网络依赖库 (支持 aiohttp/TLS 测速)
+      # 修正：将 certifi 统一通过 toolchain pip 安装
       - name: Install Python Package Dependencies
         run: |
-          toolchain pip install aiohttp certifi multidict yarl frozenlist aiosignal async-timeout
+          toolchain pip install certifi aiohttp multidict yarl frozenlist aiosignal async-timeout
 
-      # 4. 生成 Xcode 工程
       - name: Create Xcode Project
         run: |
-          toolchain create "CloudFlareScan" .
+          toolchain create "CloudflareScan" .
 
-      # 5. 使用 xcodebuild 无证书编译项目
       - name: Build Xcode Project
         run: |
           cd cloudflarescan-ios
-          xcodebuild -project CloudFlareScan.xcodeproj \
-            -scheme CloudFlareScan \
+          xcodebuild -project CloudflareScan.xcodeproj \
+            -scheme CloudflareScan \
             -configuration Release \
             -sdk iphoneos \
             CODE_SIGNING_ALLOWED=NO \
@@ -73,23 +70,16 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             clean build
 
-      # 6. 打包 IPA 并使用 ldid 进行 TrollStore 专属伪签名
       - name: Package IPA for TrollStore
         run: |
           mkdir -p Payload
-          # 复制生成的 App 目录到 Payload 结构中
-          cp -R cloudflarescan-ios/build/Release-iphoneos/CloudFlareScan.app Payload/
-          
-          # 给 App 注入伪签名 (TrollStore 正常运行的关键步骤)
-          ldid -S Payload/CloudFlareScan.app/CloudFlareScan
-          
-          # 压缩为标准的 IPA 包
-          zip -r CloudFlareScan-iOS-TrollStore.ipa Payload
+          cp -R cloudflarescan-ios/build/Release-iphoneos/CloudflareScan.app Payload/
+          ldid -S Payload/CloudflareScan.app/CloudflareScan
+          zip -r CloudflareScan-iOS-TrollStore.ipa Payload
 
-      # 7. 上传 IPA 构建产物到 GitHub Actions Artifacts
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
           name: CloudFlareScan-iOS-TrollStore
-          path: CloudFlareScan-iOS-TrollStore.ipa
+          path: CloudflareScan-iOS-TrollStore.ipa
           retention-days: 7
