@@ -38,29 +38,23 @@ jobs:
         with:
           path: |
             ~/.kivy-ios
-            build
             dist
-          key: ${{ runner.os }}-kivy-ios-v9-${{ hashFiles('**/main.py') }}
+          key: ${{ runner.os }}-kivy-ios-v11-${{ hashFiles('**/main.py') }}
           restore-keys: |
-            ${{ runner.os }}-kivy-ios-v9-
+            ${{ runner.os }}-kivy-ios-v11-
 
       - name: Build Kivy-iOS Recipes
         run: |
           toolchain build python3 kivy openssl
 
-      - name: Purge Demo Files & Create Xcode Project
+      - name: Prepare Clean Source & Create Xcode Project
         run: |
-          # 关键修复：直接删除 Kivy 默认打包入内的数万个示例、测试和文档文件，防止复制超时
-          rm -rf dist/root/python3/share/kivy-examples
-          rm -rf dist/root/python3/share/doc
-          find dist/root/python3 -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true
-          find dist/root/python3 -type d -name "test" -exec rm -rf {} + 2>/dev/null || true
-          find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-          find . -name "*.pyc" -delete 2>/dev/null || true
+          # 独立导出 app_src，彻底切断 rsync 的死循环与打包超大垃圾文件
+          rm -rf app_src cloudflarescan-ios
+          mkdir -p app_src
+          cp main.py app_src/
 
-          # 清理历史 Xcode 工程并重新生成
-          rm -rf cloudflarescan-ios
-          toolchain create "cloudflarescan" .
+          toolchain create "cloudflarescan" "$PWD/app_src"
 
       - name: Build Xcode Project
         run: |
@@ -69,6 +63,7 @@ jobs:
             -scheme cloudflarescan \
             -configuration Release \
             -sdk iphoneos \
+            SYMROOT="$PWD/build" \
             IPHONEOS_DEPLOYMENT_TARGET=13.0 \
             ENABLE_USER_SCRIPT_SANDBOXING=NO \
             CODE_SIGNING_ALLOWED=NO \
@@ -87,6 +82,6 @@ jobs:
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CloudFlareScan-iOS-TrollStore
+          name: CloudflareScan-iOS-TrollStore
           path: CloudflareScan-iOS-TrollStore.ipa
           retention-days: 7
