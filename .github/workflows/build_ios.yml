@@ -20,7 +20,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11' # 保持与 kivy-ios 内部 hostpython 版本一致
 
       - name: Install macOS System Dependencies
         run: |
@@ -40,17 +40,22 @@ jobs:
             ~/.kivy-ios
             build
             dist
-          key: ${{ runner.os }}-kivy-ios-v4-${{ hashFiles('**/requirements.txt', '**/main.py') }}
+          key: ${{ runner.os }}-kivy-ios-v5-${{ hashFiles('**/requirements.txt', '**/main.py') }}
           restore-keys: |
-            ${{ runner.os }}-kivy-ios-v4-
+            ${{ runner.os }}-kivy-ios-v5-
 
       - name: Build Kivy-iOS Recipes
         run: |
           toolchain build python3 kivy openssl
 
+      # 关键修复：加入 NO_EXTENSIONS 环境变量，强制使用纯 Python 模式安装网络库，防止打包脚本崩溃
       - name: Install Python Package Dependencies
         run: |
-          toolchain pip install certifi aiohttp multidict yarl frozenlist aiosignal async-timeout
+          export AIOHTTP_NO_EXTENSIONS=1
+          export YARL_NO_EXTENSIONS=1
+          export MULTIDICT_NO_EXTENSIONS=1
+          export FROZENLIST_NO_EXTENSIONS=1
+          toolchain pip install certifi multidict yarl frozenlist aiosignal async-timeout aiohttp
 
       - name: Create Xcode Project
         run: |
@@ -59,7 +64,6 @@ jobs:
       - name: Build Xcode Project
         run: |
           cd cloudflarescan-ios
-          # 修正：将 -scheme 统一修改为全小写 cloudflarescan
           xcodebuild -project cloudflarescan.xcodeproj \
             -scheme cloudflarescan \
             -configuration Release \
@@ -72,7 +76,6 @@ jobs:
       - name: Package IPA for TrollStore
         run: |
           mkdir -p Payload
-          # 修正：使用通配符匹配 .app 路径与可执行文件，防止大小写不一致导致的找不到文件问题
           cp -R cloudflarescan-ios/build/Release-iphoneos/*.app Payload/
           APP_NAME=$(ls Payload/)
           ldid -S "Payload/$APP_NAME/cloudflarescan" || ldid -S "Payload/$APP_NAME/${APP_NAME%.app}"
