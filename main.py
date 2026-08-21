@@ -1,42 +1,39 @@
-import gc
-import glob
-import ipaddress
-import json
 import os
-import queue
-import random
-import re
+import sys
+import glob
+import time
+import json
 import socket
 import ssl
-import sys
+import random
+import re
+import queue
 import threading
-import time
-import urllib.request
+import ipaddress
 from concurrent.futures import ThreadPoolExecutor
 
 from kivy.app import App
 from kivy.clock import Clock
-from kivy.core.clipboard import Clipboard
-from kivy.core.text import DEFAULT_FONT, LabelBase
 from kivy.lang import Builder
 from kivy.metrics import dp, sp
-from kivy.properties import BooleanProperty, ListProperty, NumericProperty, StringProperty
+from kivy.core.text import LabelBase, DEFAULT_FONT
+from kivy.properties import StringProperty, NumericProperty, BooleanProperty, ListProperty
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
-from kivy.uix.popup import Popup
-from kivy.uix.scrollview import ScrollView
-from kivy.uix.spinner import Spinner
-from kivy.uix.switch import Switch
 from kivy.uix.textinput import TextInput
+from kivy.uix.switch import Switch
+from kivy.uix.spinner import Spinner
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.popup import Popup
 
-# ==================== 1. iOS 中文字体兼容支持 ====================
+# ==================== 1. 安全注册 iOS 中文字体 ====================
 def init_ios_cjk_font():
     font_candidates = [
         "/System/Library/Fonts/LanguageSupport/PingFang.ttc",
         "/System/Library/Fonts/CoreUI/PingFang.ttc",
-        "/System/Library/Fonts/Core/STHeiti-Light.ttc",
         "/System/Library/Fonts/AppFonts/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
     ]
     chosen_font = None
     for path in font_candidates:
@@ -54,11 +51,15 @@ def init_ios_cjk_font():
             LabelBase.register(name=DEFAULT_FONT, fn_regular=chosen_font)
             LabelBase.register(name="Roboto", fn_regular=chosen_font)
         except Exception as e:
-            print(f"[Font] 注册字体失败: {e}")
+            print(f"[Font Warning] 注册字体失败: {e}")
 
-init_ios_cjk_font()
+# 执行字体注册
+try:
+    init_ios_cjk_font()
+except Exception as e:
+    print(f"[Font Safe Guard] 字体初始化跳过: {e}")
 
-# ==================== 2. 全量官方 IPv4 / IPv6 IP 库 ====================
+# ==================== 2. 内置官方 IP 库 ====================
 BUILTIN_IPV4_OFFICIAL = [
     "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22",
     "141.101.64.0/18", "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20",
@@ -80,7 +81,7 @@ COLO_MAP = {
 }
 
 def parse_ips_safe(text, max_samples=1000):
-    """安全且防止崩溃的 IPv4/IPv6 万能流式解析器"""
+    """安全且防崩溃的 IP 解析器"""
     found_ips = set()
     if not text:
         return []
@@ -94,7 +95,6 @@ def parse_ips_safe(text, max_samples=1000):
             continue
 
         try:
-            # 尝试解析为 IP 网段 CIDR
             if '/' in line:
                 net = ipaddress.ip_network(line, strict=False)
                 num = net.num_addresses
@@ -108,7 +108,6 @@ def parse_ips_safe(text, max_samples=1000):
                         if len(found_ips) >= max_samples:
                             break
             else:
-                # 单个 IPv4 或 IPv6 地址验证
                 ip_obj = ipaddress.ip_address(line)
                 found_ips.add(str(ip_obj))
         except Exception:
@@ -116,7 +115,7 @@ def parse_ips_safe(text, max_samples=1000):
 
     return list(found_ips)
 
-# ==================== 3. 图二风格 iOS 原生白卡片 KV 布局 ====================
+# ==================== 3. Kivy KV 纯原生 UI 布局 ====================
 KV_STYLE = """
 #:kivy 2.0.0
 
@@ -126,7 +125,7 @@ KV_STYLE = """
     spacing: dp(8)
     canvas.before:
         Color:
-            rgba: (1, 1, 1, 1)  # 纯白卡片背景
+            rgba: (1, 1, 1, 1)
         RoundedRectangle:
             pos: self.pos
             size: self.size
@@ -138,7 +137,7 @@ KV_STYLE = """
     font_size: '12sp'
     bold: True
     color: (1, 1, 1, 1)
-    btn_color: (0/255, 122/255, 255/255, 1) # iOS 经典蓝色
+    btn_color: (0/255, 122/255, 255/255, 1)
     canvas.before:
         Color:
             rgba: self.btn_color if self.state == 'normal' else (self.btn_color[0]*0.8, self.btn_color[1]*0.8, self.btn_color[2]*0.8, 1)
@@ -216,7 +215,7 @@ KV_STYLE = """
 <MainUI>:
     canvas.before:
         Color:
-            rgba: (242/255, 242/255, 247/255, 1) # iOS 灰色全局背景
+            rgba: (242/255, 242/255, 247/255, 1)
         Rectangle:
             pos: self.pos
             size: self.size
@@ -230,7 +229,7 @@ KV_STYLE = """
             size_hint_y: None
             height: self.minimum_height
 
-            # 顶部标题栏
+            # 标题
             Label:
                 text: "[b]优选 IP 筛选工具[/b]"
                 markup: True
@@ -239,7 +238,7 @@ KV_STYLE = """
                 size_hint_y: None
                 height: dp(28)
 
-            # 1. 导入 IP 文件 卡片
+            # 1. 导入 IP 文件
             CardBox:
                 size_hint_y: None
                 height: dp(100)
@@ -260,17 +259,17 @@ KV_STYLE = """
 
                     StyledButton:
                         text: "官方 IPv4 库"
-                        btn_color: (0/255, 122/255, 255/255, 1) # 蓝色
+                        btn_color: (0/255, 122/255, 255/255, 1)
                         on_release: root.load_preset_ip("v4")
 
                     StyledButton:
                         text: "官方 IPv6 库"
-                        btn_color: (52/255, 199/255, 89/255, 1) # 绿色
+                        btn_color: (52/255, 199/255, 89/255, 1)
                         on_release: root.load_preset_ip("v6")
 
                     StyledButton:
                         text: "粘贴/重置"
-                        btn_color: (255/255, 149/255, 0/255, 1) # 橙色
+                        btn_color: (255/255, 149/255, 0/255, 1)
                         on_release: root.paste_from_clipboard()
 
                 Label:
@@ -282,7 +281,7 @@ KV_STYLE = """
                     halign: 'left'
                     text_size: self.size
 
-            # 2. 扫描设置 卡片
+            # 2. 扫描设置
             CardBox:
                 size_hint_y: None
                 height: dp(240)
@@ -351,7 +350,6 @@ KV_STYLE = """
                             id: timeout_input
                             text: "2"
 
-                # 开关 & 地区选择
                 BoxLayout:
                     size_hint_y: None
                     height: dp(32)
@@ -378,7 +376,6 @@ KV_STYLE = """
                         color: (0, 0, 0, 1)
                         size_hint_x: 0.45
 
-                # 开始 / 停止 按钮
                 BoxLayout:
                     spacing: dp(8)
                     size_hint_y: None
@@ -403,7 +400,7 @@ KV_STYLE = """
                     halign: 'left'
                     text_size: self.size
 
-            # 3. 可用 IP 列表 卡片
+            # 3. 可用 IP 列表
             CardBox:
                 size_hint_y: None
                 height: dp(360)
@@ -417,14 +414,13 @@ KV_STYLE = """
                     halign: 'left'
                     text_size: self.size
 
-                # 顶部控制栏 + 复制按钮
                 BoxLayout:
                     size_hint_y: None
                     height: dp(30)
                     spacing: dp(6)
 
                     Label:
-                        text: f"已筛选: {len(root.valid_ips_data)} 个"
+                        text: "已筛选: " + str(len(root.valid_ips_data)) + " 个"
                         font_size: '11sp'
                         color: (100/255, 100/255, 100/255, 1)
                         halign: 'left'
@@ -433,11 +429,10 @@ KV_STYLE = """
 
                     StyledButton:
                         text: "📋 一键复制 IP"
-                        btn_color: (52/255, 199/255, 89/255, 1) # iOS 绿
+                        btn_color: (52/255, 199/255, 89/255, 1)
                         size_hint_x: 0.45
                         on_release: root.copy_ips_to_clipboard()
 
-                # 结果列表视窗
                 ScrollView:
                     do_scroll_x: False
                     BoxLayout:
@@ -470,7 +465,6 @@ class MainUI(BoxLayout):
         self.raw_ip_pool = BUILTIN_IPV4_OFFICIAL[:]
         self.result_queue = queue.Queue()
 
-        # 80ms 刷新定时器，防止 UI 主线程阻塞
         Clock.schedule_interval(self._drain_result_queue, 0.08)
 
     def load_preset_ip(self, ip_type):
@@ -483,6 +477,7 @@ class MainUI(BoxLayout):
 
     def paste_from_clipboard(self):
         try:
+            from kivy.core.clipboard import Clipboard
             text = Clipboard.paste()
             if text and text.strip():
                 lines = [l.strip() for l in text.splitlines() if l.strip()]
@@ -490,14 +485,13 @@ class MainUI(BoxLayout):
                 self.import_status_text = f"已从剪贴板读取 {len(lines)} 行文本"
             else:
                 self.import_status_text = "剪贴板为空！"
-        except Exception as e:
+        except Exception:
             self.import_status_text = "剪贴板读取失败"
 
     def start_scan(self):
         if self.is_scanning:
             return
 
-        # 解析用户输入的配置
         try:
             max_count = int(self.ids.count_input.text.strip()) if self.ids.count_input.text.strip() else 1000
         except ValueError:
@@ -513,24 +507,20 @@ class MainUI(BoxLayout):
         except ValueError:
             timeout_sec = 2.0
 
-        # 解析端口
         ports_str = self.ids.ports_input.text.strip()
         ports = [int(p.strip()) for p in re.findall(r'\d+', ports_str)] if ports_str else [443]
 
-        # 解析 IP 列表
         parsed_ips = parse_ips_safe("\n".join(self.raw_ip_pool), max_samples=max_count)
         if not parsed_ips:
             self.scan_status_text = "❌ 未检测到可用 IP，请检查输入"
             return
 
-        # 初始化状态
         self.is_scanning = True
         self.stop_requested = False
         self.ids.results_container.clear_widgets()
         self.valid_ips_data.clear()
         self.scan_status_text = f"正在扫描 0/{len(parsed_ips)}..."
 
-        # 启动后台线程
         threading.Thread(
             target=self._scan_runner,
             args=(parsed_ips, ports, threads_num, timeout_sec),
@@ -559,7 +549,6 @@ class MainUI(BoxLayout):
                     tls_sock.connect((ip, port))
                     latency = int((time.perf_counter() - start_t) * 1000)
 
-                    # 探测 Trace Colo 机房
                     try:
                         req = "GET /cdn-cgi/trace HTTP/1.1\r\nHost: speed.cloudflare.com\r\nConnection: close\r\n\r\n"
                         tls_sock.sendall(req.encode('utf-8'))
@@ -613,7 +602,6 @@ class MainUI(BoxLayout):
                     item_data = {'ip': ip, 'port': port, 'latency': latency, 'colo': colo}
                     self.valid_ips_data.append(item_data)
 
-                    # 添加到 UI 渲染列表中（直接显示在后面）
                     item_widget = ResultItem(
                         ip_text=f"{ip}:{port}",
                         region_text=colo,
@@ -635,23 +623,21 @@ class MainUI(BoxLayout):
         self.is_scanning = False
         self.scan_status_text = "已停止扫描"
 
-    # ==================== 4. 安全无闪退【一键复制 IP】 ====================
     def copy_ips_to_clipboard(self):
         try:
             if not self.valid_ips_data:
                 self._show_toast("暂无有效 IP，请先开始扫描！")
                 return
 
-            # 提取纯净的 IP:端口 列表（每行一个）
             lines = [f"{item['ip']}:{item['port']}" for item in self.valid_ips_data]
             export_text = "\n".join(lines)
 
-            # 主线程安全调用剪贴板
+            from kivy.core.clipboard import Clipboard
             Clipboard.copy(str(export_text))
 
             count = len(lines)
             self._show_toast(f"✅ 成功复制 {count} 个 IP 到剪贴板！")
-        except Exception as e:
+        except Exception:
             self._show_toast("复制完成！")
 
     def _show_toast(self, message):
