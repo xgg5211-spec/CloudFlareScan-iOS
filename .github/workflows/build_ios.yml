@@ -20,7 +20,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11' # 保持与 kivy-ios 内部 hostpython 版本一致
+          python-version: '3.10'
 
       - name: Install macOS System Dependencies
         run: |
@@ -33,6 +33,7 @@ jobs:
           pip install "cython<3.0.0"
           pip install kivy-ios
 
+      # 升级缓存 Key (v7) 彻底清理旧的过期缓存文件
       - name: Restore Kivy-iOS Cache
         uses: actions/cache@v4
         with:
@@ -40,34 +41,30 @@ jobs:
             ~/.kivy-ios
             build
             dist
-          key: ${{ runner.os }}-kivy-ios-v5-${{ hashFiles('**/requirements.txt', '**/main.py') }}
+          key: ${{ runner.os }}-kivy-ios-v7-${{ hashFiles('**/main.py') }}
           restore-keys: |
-            ${{ runner.os }}-kivy-ios-v5-
+            ${{ runner.os }}-kivy-ios-v7-
 
       - name: Build Kivy-iOS Recipes
         run: |
           toolchain build python3 kivy openssl
 
-      # 关键修复：加入 NO_EXTENSIONS 环境变量，强制使用纯 Python 模式安装网络库，防止打包脚本崩溃
-      - name: Install Python Package Dependencies
+      - name: Clean Python Cache & Create Xcode Project
         run: |
-          export AIOHTTP_NO_EXTENSIONS=1
-          export YARL_NO_EXTENSIONS=1
-          export MULTIDICT_NO_EXTENSIONS=1
-          export FROZENLIST_NO_EXTENSIONS=1
-          toolchain pip install certifi multidict yarl frozenlist aiosignal async-timeout aiohttp
-
-      - name: Create Xcode Project
-        run: |
+          # 关键修复：强行清理缓存与 pycache，防止 rsync 触发 code 24 导致 PhaseScriptExecution 失败
+          find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+          find . -name "*.pyc" -delete 2>/dev/null || true
           toolchain create "cloudflarescan" .
 
       - name: Build Xcode Project
         run: |
           cd cloudflarescan-ios
+          # 关键修复：将 IPHONEOS_DEPLOYMENT_TARGET 提升至 13.0，适配 Xcode 15
           xcodebuild -project cloudflarescan.xcodeproj \
             -scheme cloudflarescan \
             -configuration Release \
             -sdk iphoneos \
+            IPHONEOS_DEPLOYMENT_TARGET=13.0 \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
