@@ -11,10 +11,10 @@ on:
 
 jobs:
   build-ipa:
-    runs-on: macos-14
+    runs-on: macos-14 # 使用 Apple Silicon M1/M2 高速 Mac 构建节点
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -22,211 +22,74 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Add Python to Global PATH
+      - name: Install macOS System Dependencies
         run: |
-          echo "$(dirname $(which python3))" >> $GITHUB_PATH
+          brew update
+          brew install autoconf automake libtool pkg-config cmake ldid
 
+      - name: Install Kivy-iOS and Build Tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install "cython<3.0.0" # 保持兼容 iOS toolchain 的 Cython 版本
+          pip install kivy-ios
+
+      # 1. 恢复 Kivy-iOS 编译缓存 (大大缩短后续 Actions 运行时间)
       - name: Restore Kivy-iOS Cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache@v4
         with:
-          path: ~/.kivy-ios
-          key: ${{ runner.os }}-kivy-ios-v1
+          path: |
+            ~/.kivy-ios
+            build
+            dist
+          key: ${{ runner.os }}-kivy-ios-v2-${{ hashFiles('**/requirements.txt', '**/main.py') }}
+          restore-keys: |
+            ${{ runner.os }}-kivy-ios-v2-
 
-      - name: Install dependencies & kivy-ios
+      # 2. 编译 Python 基础运行环境及核心 C 拓展 (包含 TLS/SSL 拓展)
+      - name: Build Kivy-iOS Recipes
         run: |
-          brew install autoconf automake libtool pkg-config
-          pip install kivy-ios cython
+          toolchain build python3 kivy openssl certifi
 
-      - name: Prepare UI & Inject CloudFlare Scan V4.0 Layout
+      # 3. 为 iOS 环境安装 Python 异步网络依赖库 (支持 aiohttp/TLS 测速)
+      - name: Install Python Package Dependencies
         run: |
-          mkdir -p app_src
-          
-          # 1. 下载开源中文字体
-          curl -L -o app_src/font.ttf "https://github.com/google/fonts/raw/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf"
-          
-          # 2. 写入 GUI 界面代码（标语已修改为“鱼儿专用”）
-          cat << 'EOF' > app_src/main.py
-          import os
-          from kivy.app import App
-          from kivy.core.text import LabelBase
-          from kivy.uix.boxlayout import BoxLayout
-          from kivy.uix.gridlayout import GridLayout
-          from kivy.uix.label import Label
-          from kivy.uix.button import Button
-          from kivy.uix.textinput import TextInput
-          from kivy.uix.scrollview import ScrollView
-          from kivy.core.window import Window
-          from kivy.graphics import Color, Rectangle, RoundedRectangle
+          toolchain pip install aiohttp certifi multidict yarl frozenlist aiosignal async-timeout
 
-          Window.clearcolor = (0.95, 0.95, 0.97, 1)
+      # 4. 生成 Xcode 工程
+      - name: Create Xcode Project
+        run: |
+          toolchain create "CloudFlareScan" .
 
-          font_path = os.path.join(os.path.dirname(__file__), 'font.ttf')
-          if os.path.exists(font_path):
-              LabelBase.register(name='Roboto', fn_regular=font_path)
-
-          class StyledButton(Button):
-              def __init__(self, bg_color=(0.2, 0.5, 0.9, 1), text_color=(1, 1, 1, 1), **kwargs):
-                  super().__init__(**kwargs)
-                  self.background_normal = ''
-                  self.background_color = (0, 0, 0, 0)
-                  self.color = text_color
-                  self.bold = True
-                  self.bg_color = bg_color
-                  self.bind(pos=self.update_canvas, size=self.update_canvas)
-
-              def update_canvas(self, *args):
-                  self.canvas.before.clear()
-                  with self.canvas.before:
-                      Color(*self.bg_color)
-                      RoundedRectangle(pos=self.pos, size=self.size, radius=[8])
-
-          class CloudFlareScanApp(App):
-              def build(self):
-                  root = BoxLayout(orientation='vertical', padding=12, spacing=10)
-
-                  # 标题栏
-                  title_box = BoxLayout(size_hint_y=None, height=40, orientation='horizontal')
-                  title_box.add_widget(Label(text="CloudFlare", color=(0.95, 0.45, 0.1, 1), font_size='22sp', bold=True, size_hint_x=None, width=120))
-                  title_box.add_widget(Label(text="Scan", color=(0.1, 0.1, 0.1, 1), font_size='22sp', bold=True, size_hint_x=None, width=70))
-                  root.add_widget(title_box)
-
-                  # 居中副标题（定制名称）
-                  sub_box = BoxLayout(size_hint_y=None, height=25)
-                  sub_box.add_widget(Label(text="鱼儿专用", color=(0.2, 0.4, 0.8, 1), font_size='14sp', bold=True))
-                  root.add_widget(sub_box)
-
-                  # 按钮区 - 第一排
-                  btn_grid1 = GridLayout(cols=3, spacing=8, size_hint_y=None, height=38)
-                  btn_grid1.add_widget(StyledButton(text="IPv4 扫描", bg_color=(0.23, 0.51, 0.96, 1)))
-                  btn_grid1.add_widget(StyledButton(text="IPv6 扫描", bg_color=(0.1, 0.68, 0.37, 1)))
-                  btn_grid1.add_widget(StyledButton(text="停止任务", bg_color=(0.88, 0.88, 0.9, 1), text_color=(0.4, 0.4, 0.4, 1)))
-                  root.add_widget(btn_grid1)
-
-                  # 按钮区 - 第二排
-                  btn_grid2 = GridLayout(cols=3, spacing=8, size_hint_y=None, height=38)
-                  btn_grid2.add_widget(StyledButton(text="地区测速", bg_color=(0.92, 0.28, 0.6, 1)))
-                  btn_grid2.add_widget(StyledButton(text="完全测速", bg_color=(0.95, 0.45, 0.1, 1)))
-                  btn_grid2.add_widget(StyledButton(text="导出结果", bg_color=(0.88, 0.88, 0.9, 1), text_color=(0.4, 0.4, 0.4, 1)))
-                  root.add_widget(btn_grid2)
-
-                  # 参数输入区 - 行 1
-                  in_grid1 = GridLayout(cols=3, spacing=6, size_hint_y=None, height=36)
-                  in_grid1.add_widget(TextInput(hint_text="输入地区码", multiline=False, halign='center'))
-                  
-                  p_box1 = BoxLayout(orientation='horizontal')
-                  p_box1.add_widget(Label(text="测速数量", color=(0.2, 0.2, 0.2, 1), font_size='12sp'))
-                  p_box1.add_widget(TextInput(text="10", multiline=False, halign='center'))
-                  in_grid1.add_widget(p_box1)
-
-                  p_box2 = BoxLayout(orientation='horizontal')
-                  p_box2.add_widget(Label(text="端口", color=(0.2, 0.2, 0.2, 1), font_size='12sp'))
-                  p_box2.add_widget(TextInput(text="443", multiline=False, halign='center'))
-                  in_grid1.add_widget(p_box2)
-                  root.add_widget(in_grid1)
-
-                  # 参数输入区 - 行 2
-                  in_grid2 = GridLayout(cols=2, spacing=8, size_hint_y=None, height=36)
-                  p_box3 = BoxLayout(orientation='horizontal')
-                  p_box3.add_widget(Label(text="并发线程", color=(0.2, 0.2, 0.2, 1), font_size='12sp'))
-                  p_box3.add_widget(TextInput(text="150", multiline=False, halign='center'))
-                  in_grid2.add_widget(p_box3)
-
-                  p_box4 = BoxLayout(orientation='horizontal')
-                  p_box4.add_widget(Label(text="延迟上限", color=(0.2, 0.2, 0.2, 1), font_size='12sp'))
-                  p_box4.add_widget(TextInput(text="220", multiline=False, halign='center'))
-                  in_grid2.add_widget(p_box4)
-                  root.add_widget(in_grid2)
-
-                  # 状态行
-                  status_box = BoxLayout(size_hint_y=None, height=24)
-                  status_box.add_widget(Label(text="扫描就绪", color=(0.4, 0.4, 0.4, 1), font_size='12sp', halign='left'))
-                  status_box.add_widget(Label(text="速度: 0.0 IP/秒", color=(0.2, 0.2, 0.2, 1), font_size='12sp', halign='right'))
-                  root.add_widget(status_box)
-
-                  # 选项卡按钮
-                  tab_box = GridLayout(cols=2, spacing=10, size_hint_y=None, height=36)
-                  tab_box.add_widget(StyledButton(text="扫描日志", bg_color=(0.07, 0.32, 0.48, 1)))
-                  tab_box.add_widget(StyledButton(text="测速结果", bg_color=(0.88, 0.88, 0.9, 1), text_color=(0.4, 0.4, 0.4, 1)))
-                  root.add_widget(tab_box)
-
-                  # 深蓝色日志框
-                  log_container = BoxLayout(padding=8)
-                  with log_container.canvas.before:
-                      Color(0.06, 0.18, 0.28, 1)
-                      RoundedRectangle(pos=log_container.pos, size=log_container.size, radius=[8])
-                  log_container.bind(pos=lambda obj, val: self._update_bg(obj), size=lambda obj, val: self._update_bg(obj))
-
-                  scroll = ScrollView()
-                  self.log_label = Label(
-                      text="点击上方 [IPv4 扫描] 或 [IPv6 扫描] 开始测速...\n\n===========================",
-                      color=(0.9, 0.95, 1, 1),
-                      font_size='12sp',
-                      size_hint_y=None,
-                      valign='top',
-                      halign='left'
-                  )
-                  self.log_label.bind(texture_size=self.log_label.setter('size'))
-                  scroll.add_widget(self.log_label)
-                  log_container.add_widget(scroll)
-
-                  root.add_widget(log_container)
-                  return root
-
-              def _update_bg(self, instance):
-                  instance.canvas.before.clear()
-                  with instance.canvas.before:
-                      Color(0.06, 0.18, 0.28, 1)
-                      RoundedRectangle(pos=instance.pos, size=instance.size, radius=[8])
-
-          if __name__ == '__main__':
-              CloudFlareScanApp().run()
-          EOF
-
-          toolchain build python3 kivy 2>&1 | grep -v -E "Listing '|compiling '" || true
-          toolchain create cloudflarescan app_src
-
-      - name: Save Kivy-iOS Cache
-        uses: actions/cache/save@v4
-        if: always()
-        with:
-          path: ~/.kivy-ios
-          key: ${{ runner.os }}-kivy-ios-v1
-
-      - name: Compile Xcode & Package IPA
+      # 5. 使用 xcodebuild 无证书编译项目
+      - name: Build Xcode Project
         run: |
           cd cloudflarescan-ios
-          
-          python3 -c "
-          path = 'cloudflarescan.xcodeproj/project.pbxproj'
-          with open(path, 'r') as f:
-              data = f.read()
-          data = data.replace('shellScript = \"', 'shellScript = \"set +e; ')
-          with open(path, 'w') as f:
-              f.write(data)
-          "
-          
-          xcodebuild -project cloudflarescan.xcodeproj \
-                     -scheme cloudflarescan \
-                     -configuration Release \
-                     -sdk iphoneos \
-                     -destination 'generic/platform=iOS' \
-                     CONFIGURATION_BUILD_DIR=build/Release-iphoneos \
-                     ARCHS="arm64" \
-                     ONLY_ACTIVE_ARCH=NO \
-                     IPHONEOS_DEPLOYMENT_TARGET=13.0 \
-                     ENABLE_USER_SCRIPT_SANDBOXING=NO \
-                     COMPILER_INDEX_STORE_ENABLE=NO \
-                     CODE_SIGNING_ALLOWED=NO \
-                     CODE_SIGNING_REQUIRED=NO \
-                     CODE_SIGN_IDENTITY="" \
-                     build
-          
-          mkdir -p Payload
-          cp -r build/Release-iphoneos/*.app Payload/
-          zip -r CloudFlareScan.ipa Payload
+          xcodebuild -project CloudFlareScan.xcodeproj \
+            -scheme CloudFlareScan \
+            -configuration Release \
+            -sdk iphoneos \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            clean build
 
+      # 6. 打包 IPA 并使用 ldid 进行 TrollStore 专属伪签名
+      - name: Package IPA for TrollStore
+        run: |
+          mkdir -p Payload
+          # 复制生成的 App 目录到 Payload 结构中
+          cp -R cloudflarescan-ios/build/Release-iphoneos/CloudFlareScan.app Payload/
+          
+          # 给 App 注入伪签名 (TrollStore 正常运行的关键步骤)
+          ldid -S Payload/CloudFlareScan.app/CloudFlareScan
+          
+          # 压缩为标准的 IPA 包
+          zip -r CloudFlareScan-iOS-TrollStore.ipa Payload
+
+      # 7. 上传 IPA 构建产物到 GitHub Actions Artifacts
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CloudFlareScan-TrollStore
-          path: cloudflarescan-ios/CloudFlareScan.ipa
+          name: CloudFlareScan-iOS-TrollStore
+          path: CloudFlareScan-iOS-TrollStore.ipa
+          retention-days: 7
