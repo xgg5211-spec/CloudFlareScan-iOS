@@ -40,29 +40,28 @@ jobs:
             ~/.kivy-ios
             build
             dist
-          key: ${{ runner.os }}-kivy-ios-v3-${{ hashFiles('**/requirements.txt', '**/main.py') }}
+          key: ${{ runner.os }}-kivy-ios-v4-${{ hashFiles('**/requirements.txt', '**/main.py') }}
           restore-keys: |
-            ${{ runner.os }}-kivy-ios-v3-
+            ${{ runner.os }}-kivy-ios-v4-
 
-      # 修正：去除了 certifi Recipe（仅保留需底层 C 编译的库）
       - name: Build Kivy-iOS Recipes
         run: |
           toolchain build python3 kivy openssl
 
-      # 修正：将 certifi 统一通过 toolchain pip 安装
       - name: Install Python Package Dependencies
         run: |
           toolchain pip install certifi aiohttp multidict yarl frozenlist aiosignal async-timeout
 
       - name: Create Xcode Project
         run: |
-          toolchain create "CloudflareScan" .
+          toolchain create "cloudflarescan" .
 
       - name: Build Xcode Project
         run: |
           cd cloudflarescan-ios
-          xcodebuild -project CloudflareScan.xcodeproj \
-            -scheme CloudflareScan \
+          # 修正：将 -scheme 统一修改为全小写 cloudflarescan
+          xcodebuild -project cloudflarescan.xcodeproj \
+            -scheme cloudflarescan \
             -configuration Release \
             -sdk iphoneos \
             CODE_SIGNING_ALLOWED=NO \
@@ -73,8 +72,10 @@ jobs:
       - name: Package IPA for TrollStore
         run: |
           mkdir -p Payload
-          cp -R cloudflarescan-ios/build/Release-iphoneos/CloudflareScan.app Payload/
-          ldid -S Payload/CloudflareScan.app/CloudflareScan
+          # 修正：使用通配符匹配 .app 路径与可执行文件，防止大小写不一致导致的找不到文件问题
+          cp -R cloudflarescan-ios/build/Release-iphoneos/*.app Payload/
+          APP_NAME=$(ls Payload/)
+          ldid -S "Payload/$APP_NAME/cloudflarescan" || ldid -S "Payload/$APP_NAME/${APP_NAME%.app}"
           zip -r CloudflareScan-iOS-TrollStore.ipa Payload
 
       - name: Upload IPA Artifact
