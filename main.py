@@ -9,61 +9,49 @@ import urllib.request
 
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.gridlayout import GridLayout
 from kivy.uix.textinput import TextInput
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.core.clipboard import Clipboard
 from kivy.clock import Clock
-from kivy.graphics import Color, Rectangle
+from kivy.graphics import Color, Rectangle, Line
 from kivy.metrics import dp
 
-# ==========================================
-# 1. 🎲 随机 UI 主题配色方案 (RGB 0-1)
-# ==========================================
+# ---------------------------------------------------------
+# 🎨 随机精美主题库（每次启动随机切换酷炫配色）
+# ---------------------------------------------------------
 THEMES = [
-    # 01. Cyberpunk Neon (赛博霓虹)
     {
-        "name": "NEON CYBER",
-        "bg": (0.04, 0.04, 0.07, 1),
-        "card": (0.08, 0.10, 0.15, 1),
-        "main": (0.0, 0.9, 0.9, 1),       # Cyan
-        "accent": (0.0, 1.0, 0.5, 1),     # Green
-        "text": (0.85, 0.92, 1.0, 1)
+        "name": "极客霓虹",
+        "bg": (0.05, 0.06, 0.10, 1),
+        "card": (0.09, 0.11, 0.18, 1),
+        "main": (0.0, 0.8, 1.0, 1),
+        "accent": (0.0, 1.0, 0.6, 1),
+        "text": (0.9, 0.95, 1.0, 1)
     },
-    # 02. Hacker Matrix (黑客帝国)
     {
-        "name": "MATRIX TERMINAL",
-        "bg": (0.02, 0.05, 0.02, 1),
-        "card": (0.05, 0.12, 0.05, 1),
-        "main": (0.2, 1.0, 0.2, 1),       # Matrix Green
-        "accent": (0.8, 1.0, 0.0, 1),     # Lime
-        "text": (0.7, 1.0, 0.7, 1)
-    },
-    # 03. Vaporwave Sunset (日落蒸汽波)
-    {
-        "name": "SUNSET DRIFT",
-        "bg": (0.08, 0.04, 0.09, 1),
-        "card": (0.15, 0.08, 0.18, 1),
-        "main": (1.0, 0.2, 0.6, 1),       # Magenta
-        "accent": (0.4, 0.8, 1.0, 1),     # Sky Blue
-        "text": (1.0, 0.85, 0.95, 1)
-    },
-    # 04. Minimalist Mono (极简暗黑)
-    {
-        "name": "MONO DARK",
-        "bg": (0.08, 0.08, 0.08, 1),
-        "card": (0.14, 0.14, 0.14, 1),
-        "main": (0.9, 0.9, 0.9, 1),       # White/Grey
-        "accent": (1.0, 0.6, 0.0, 1),     # Amber
+        "name": "赛博暗黑",
+        "bg": (0.03, 0.03, 0.04, 1),
+        "card": (0.08, 0.08, 0.10, 1),
+        "main": (1.0, 0.4, 0.7, 1),
+        "accent": (0.3, 0.9, 1.0, 1),
         "text": (0.9, 0.9, 0.9, 1)
+    },
+    {
+        "name": "琥珀矩阵",
+        "bg": (0.06, 0.04, 0.02, 1),
+        "card": (0.12, 0.09, 0.05, 1),
+        "main": (1.0, 0.6, 0.0, 1),
+        "accent": (0.2, 1.0, 0.4, 1),
+        "text": (1.0, 0.9, 0.8, 1)
     }
 ]
 
-# 地区缩写表
 CF_COLO = {
-    "HKG": "HK", "TPE": "TW", "KHH": "TW", "NRT": "JP", "KIX": "JP", 
-    "ICN": "KR", "SIN": "SG", "BKK": "TH", "KUL": "MY", "SJC": "US", 
-    "LAX": "US", "SEA": "US", "FRA": "DE", "LHR": "UK", "CDG": "FR"
+    "HKG": "香港", "TPE": "台湾", "KHH": "高雄", "NRT": "东京", 
+    "KIX": "大阪", "ICN": "首尔", "SIN": "新加坡", "BKK": "曼谷", 
+    "SJC": "圣何塞", "LAX": "洛杉矶", "FRA": "法兰克福", "LHR": "伦敦"
 }
 
 SSL_CTX = ssl.create_default_context()
@@ -71,265 +59,290 @@ SSL_CTX.check_hostname = False
 SSL_CTX.verify_mode = ssl.CERT_NONE
 
 
-class CyberApp(App):
-    def build(self):
-        # 随机抽取当前套主题
-        self.theme = random.choice(THEMES)
-        self.title = f"PROXY SCANNER [{self.theme['name']}]"
-        self.valid_ips = []
+class CardBox(BoxLayout):
+    """卡片式容器：带圆角和边框阴影感"""
+    def __init__(self, bg_color, border_color, **kwargs):
+        super().__init__(**kwargs)
+        with self.canvas.before:
+            Color(*bg_color)
+            self.rect = Rectangle(pos=self.pos, size=self.size)
+            Color(*border_color)
+            self.line = Line(rectangle=(self.x, self.y, self.width, self.height), width=1)
+        self.bind(pos=self._update, size=self._update)
 
-        root = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(10))
-        
-        # 应用动态随机背景
+    def _update(self, *args):
+        self.rect.pos = self.pos
+        self.rect.size = self.size
+        self.line.rectangle = (self.x, self.y, self.width, self.height)
+
+
+class ProScannerApp(App):
+    def build(self):
+        self.theme = random.choice(THEMES)
+        self.title = f"IP 筛选工具 [{self.theme['name']}]"
+        self.valid_ips = []
+        self.is_running = False
+
+        # 根布局
+        root = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(8))
         with root.canvas.before:
             Color(*self.theme['bg'])
             self.bg_rect = Rectangle(pos=root.pos, size=root.size)
-        root.bind(pos=lambda obj, val: setattr(self.bg_rect, 'pos', val),
-                  size=lambda obj, val: setattr(self.bg_rect, 'size', val))
+        root.bind(pos=lambda o, v: setattr(self.bg_rect, 'pos', v),
+                  size=lambda o, v: setattr(self.bg_rect, 'size', v))
 
-        # 1. 顶部标题栏
-        title = Label(
-            text=f"> {self.theme['name']} // ENGINE <",
-            size_hint_y=None,
-            height=dp(35),
-            font_size=dp(16),
-            bold=True,
-            color=self.theme['main']
+        # 顶部标题
+        title_lbl = Label(
+            text=f"优选 IP 筛选工具 ({self.theme['name']})",
+            size_hint_y=None, height=dp(30),
+            font_size=dp(16), bold=True, color=self.theme['main']
         )
-        root.add_widget(title)
+        root.add_widget(title_lbl)
 
-        # 2. IP 输入文本框（支持单个 IP、IP:PORT、CIDR 掩码段）
-        self.input_text = TextInput(
-            text="103.21.244.13\n173.245.60.252:443\n188.114.106.185:2053\n104.16.0.0/24",
-            hint_text="PASTE IPS / CIDR (e.g. 104.16.0.0/24)...",
-            multiline=True,
-            size_hint_y=0.28,
-            background_normal='',
-            background_color=self.theme['card'],
-            foreground_color=self.theme['text'],
-            cursor_color=self.theme['main'],
-            font_size=dp(12)
-        )
-        root.add_widget(self.input_text)
-
-        # 3. 操作按钮区
-        btn_box = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(42), spacing=dp(10))
+        # ==========================================
+        # 卡片 1：导入自定义 IP / IP段
+        # ==========================================
+        card1 = CardBox(self.theme['card'], self.theme['main'], orientation='vertical', padding=dp(8), spacing=dp(5), size_hint_y=0.26)
         
-        self.scan_btn = Button(
-            text="START SCAN",
-            bold=True,
-            font_size=dp(13),
-            background_normal='',
-            background_color=self.theme['main'],
-            color=(0, 0, 0, 1)
-        )
-        self.scan_btn.bind(on_press=self.start_scan)
-        btn_box.add_widget(self.scan_btn)
-
-        self.copy_btn = Button(
-            text="COPY VALID",
-            bold=True,
-            font_size=dp(13),
-            background_normal='',
-            background_color=self.theme['accent'],
-            color=(0, 0, 0, 1)
-        )
-        self.copy_btn.bind(on_press=self.copy_results)
-        btn_box.add_widget(self.copy_btn)
-
-        root.add_widget(btn_box)
-
-        # 4. 状态栏
-        self.status_label = Label(
-            text="SYSTEM READY",
-            size_hint_y=None,
-            height=dp(25),
-            font_size=dp(12),
-            color=self.theme['main']
-        )
-        root.add_widget(self.status_label)
-
-        # 5. 日志与结果面板
-        self.result_text = TextInput(
-            text="",
-            readonly=True,
+        card1.add_widget(Label(text="1. 自定义 IP / CIDR 网段导入", font_size=dp(13), color=self.theme['text'], size_hint_y=None, height=dp(20)))
+        
+        self.ip_input = TextInput(
+            text="104.16.0.0/24\n173.245.60.252:443",
+            hint_text="支持单IP、IP:端口 或 CIDR网段...",
             multiline=True,
-            hint_text="RESULTS TERMINAL READY...",
-            background_normal='',
-            background_color=self.theme['card'],
-            foreground_color=self.theme['accent'],
+            background_normal='', background_color=(0,0,0,0.3),
+            foreground_color=self.theme['text'], cursor_color=self.theme['main'],
             font_size=dp(11)
         )
-        root.add_widget(self.result_text)
+        card1.add_widget(self.ip_input)
+        root.add_widget(card1)
+
+        # ==========================================
+        # 卡片 2：扫描设置（端口、超时）
+        # ==========================================
+        card2 = CardBox(self.theme['card'], self.theme['main'], orientation='vertical', padding=dp(8), spacing=dp(5), size_hint_y=0.28)
+        card2.add_widget(Label(text="2. 扫描高级设置", font_size=dp(13), color=self.theme['text'], size_hint_y=None, height=dp(20)))
+
+        # 网格输入小表单
+        form_grid = GridLayout(cols=2, spacing=dp(6), size_hint_y=None, height=dp(55))
+        
+        # 端口输入
+        p_box = BoxLayout(orientation='vertical', spacing=dp(2))
+        p_box.add_widget(Label(text="端口筛选 (逗号隔开)", font_size=dp(10), color=self.theme['text']))
+        self.port_input = TextInput(text="443,2053,8443", multiline=False, font_size=dp(11), background_color=(0,0,0,0.3), foreground_color=self.theme['text'])
+        p_box.add_widget(self.port_input)
+        form_grid.add_widget(p_box)
+
+        # 超时输入
+        t_box = BoxLayout(orientation='vertical', spacing=dp(2))
+        t_box.add_widget(Label(text="超时限制 (秒)", font_size=dp(10), color=self.theme['text']))
+        self.timeout_input = TextInput(text="2.5", multiline=False, font_size=dp(11), background_color=(0,0,0,0.3), foreground_color=self.theme['text'])
+        t_box.add_widget(self.timeout_input)
+        form_grid.add_widget(t_box)
+
+        card2.add_widget(form_grid)
+
+        # 按钮栏：开始扫描 / 一键复制
+        action_box = BoxLayout(orientation='horizontal', spacing=dp(8), size_hint_y=None, height=dp(38))
+        
+        self.scan_btn = Button(
+            text="开始扫描", bold=True, font_size=dp(13),
+            background_normal='', background_color=self.theme['main'], color=(0,0,0,1)
+        )
+        self.scan_btn.bind(on_press=self.toggle_scan)
+        action_box.add_widget(self.scan_btn)
+
+        self.copy_btn = Button(
+            text="一键复制 IP", bold=True, font_size=dp(13),
+            background_normal='', background_color=self.theme['accent'], color=(0,0,0,1)
+        )
+        self.copy_btn.bind(on_press=self.copy_ips)
+        action_box.add_widget(self.copy_btn)
+
+        card2.add_widget(action_box)
+        root.add_widget(card2)
+
+        # 状态栏
+        self.status_lbl = Label(text="状态: 就绪，等待指令", size_hint_y=None, height=dp(22), font_size=dp(11), color=self.theme['main'])
+        root.add_widget(self.status_lbl)
+
+        # ==========================================
+        # 卡片 3：可用 IP 实时展示终端
+        # ==========================================
+        card3 = CardBox(self.theme['card'], self.theme['accent'], orientation='vertical', padding=dp(8), spacing=dp(5), size_hint_y=0.38)
+        card3.add_widget(Label(text="3. 可用节点终端（实时更新）", font_size=dp(13), color=self.theme['text'], size_hint_y=None, height=dp(20)))
+
+        self.result_box = TextInput(
+            text="", readonly=True, multiline=True,
+            hint_text="成功连接的真实IP、TLS握手延迟、地区及测速将在此显示...",
+            background_normal='', background_color=(0,0,0,0.3),
+            foreground_color=self.theme['accent'], font_size=dp(11)
+        )
+        card3.add_widget(self.result_box)
+        root.add_widget(card3)
 
         return root
 
-    def parse_region(self, colo):
-        if not colo: return "OTHER"
-        code = str(colo).strip().upper()
-        return CF_COLO.get(code, code)
-
-    def expand_cidr(self, cidr_str):
-        """支持 CIDR 段展开与随机抽样（防内存爆满卡顿）"""
+    def parse_ports(self):
+        """解析用户输入的多个端口"""
         try:
-            ip, mask = cidr_str.split('/')
-            mask = int(mask)
-            if mask < 16: mask = 20  # 限制最大网段，避免抽样过长
-            
-            parts = [int(p) for p in ip.split('.')]
-            ip_num = (parts[0] << 24) + (parts[1] << 16) + (parts[2] << 8) + parts[3]
-            num_hosts = 1 << (32 - mask)
-            
-            sampled_ips = []
-            sample_count = min(num_hosts, 32) # 每个 CIDR 最多智能采样 32 个 IP 防卡顿
-            step = max(1, num_hosts // sample_count)
-            
-            for i in range(1, num_hosts - 1, step):
-                curr = ip_num + i
-                ip_s = f"{(curr >> 24) & 255}.{(curr >> 16) & 255}.{(curr >> 8) & 255}.{curr & 255}"
-                sampled_ips.append(f"{ip_s}:443")
-            return sampled_ips
+            ports = []
+            for p in self.port_input.text.split(','):
+                p = p.strip()
+                if p.isdigit():
+                    ports.append(int(p))
+            return ports if ports else [443]
         except Exception:
-            return []
+            return [443]
 
-    def parse_ips(self, raw_text):
+    def expand_ips(self, raw_text):
+        """智能解析自定义IP、CIDR及多端口组合"""
         lines = re.split(r'[\r\n,\s]+', str(raw_text).strip())
+        ports = self.parse_ports()
         seen = set()
-        ips = []
+        targets = []
+
         for line in lines:
             item = line.strip()
             if not item: continue
-            
+
             # 处理 CIDR 网段
             if '/' in item:
-                expanded = self.expand_cidr(item)
-                for exp_ip in expanded:
-                    if exp_ip not in seen:
-                        seen.add(exp_ip)
-                        ips.append(exp_ip)
+                try:
+                    ip, mask = item.split('/')
+                    mask = int(mask)
+                    if mask < 16: mask = 20
+                    parts = [int(p) for p in ip.split('.')]
+                    ip_num = (parts[0] << 24) + (parts[1] << 16) + (parts[2] << 8) + parts[3]
+                    num_hosts = 1 << (32 - mask)
+                    
+                    # 抽样前 40 个防卡死
+                    sample_count = min(num_hosts, 40)
+                    step = max(1, num_hosts // sample_count)
+                    for i in range(1, num_hosts - 1, step):
+                        curr = ip_num + i
+                        ip_s = f"{(curr >> 24) & 255}.{(curr >> 16) & 255}.{(curr >> 8) & 255}.{curr & 255}"
+                        for p in ports:
+                            target = f"{ip_s}:{p}"
+                            if target not in seen:
+                                seen.add(target)
+                                targets.append(target)
+                except Exception:
+                    pass
                 continue
 
-            # 自动补齐 443 端口
-            if ":" not in item:
-                item = f"{item}:443"
-                
-            if item not in seen:
-                seen.add(item)
-                ips.append(item)
-        return ips
+            # 单个 IP 处理
+            if ":" in item:
+                if item not in seen:
+                    seen.add(item)
+                    targets.append(item)
+            else:
+                for p in ports:
+                    target = f"{item}:{p}"
+                    if target not in seen:
+                        seen.add(target)
+                        targets.append(target)
+        return targets
 
-    def measure_tls_handshake(self, ip, port):
-        """底层 TLS 1.3 真实握手时延测试"""
-        try:
-            t0 = time.time()
-            sock = socket.create_connection((ip, port), timeout=1.8)
-            context = ssl.create_default_context()
-            context.check_hostname = False
-            context.verify_mode = ssl.CERT_NONE
-            tls_sock = context.wrap_socket(sock, server_hostname=ip)
-            tls_delay = round((time.time() - t0) * 1000, 1)
-            tls_sock.close()
-            return tls_delay
-        except Exception:
-            return None
-
-    def test_speed(self, ip_port):
-        """真实 HTTP 数据包下载测速"""
-        try:
-            proxy_h = urllib.request.ProxyHandler({'http': f'http://{ip_port}', 'https': f'http://{ip_port}'})
-            opener = urllib.request.build_opener(proxy_h)
-            s_req = urllib.request.Request("https://speed.cloudflare.com/__down?bytes=102400", headers={'User-Agent': 'Mozilla/5.0'})
-            st = time.time()
-            with opener.open(s_req, timeout=2.0) as s_resp:
-                buf = s_resp.read()
-                dur = time.time() - st
-                if dur > 0 and len(buf) > 0:
-                    return round((len(buf) / 1024) / dur, 1)
-        except Exception:
-            pass
-        return 0.0
-
-    def check_one_ip(self, ip_port):
-        """综合探针检测（TLS 握手 + 地区 + 运营商 + 真实速度）"""
+    def test_node(self, ip_port):
+        """TLS 握手 + 真实下载测速 + 地区自动识别"""
         try:
             ip, port = ip_port.split(":")
             port = int(port)
+            timeout = float(self.timeout_input.text or 2.5)
 
-            # 1. 先进行真实 TLS 握手测试
-            tls_delay = self.measure_tls_handshake(ip, port)
-            if not tls_delay:
-                return None
+            # 1. TLS 握手真实延迟测试
+            t0 = time.time()
+            sock = socket.create_connection((ip, port), timeout=timeout)
+            tls_sock = SSL_CTX.wrap_socket(sock, server_hostname=ip)
+            tls_delay = round((time.time() - t0) * 1000, 1)
+            tls_sock.close()
 
-            # 2. HTTP 探针验证 + ISP 识别
+            # 2. 探针获取地区与运营商
             url = f"https://check.proxyip.cmliussss.net/check?proxyip={ip_port}"
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=2.5, context=SSL_CTX) as resp:
-                if resp.status != 200: return None
+            with urllib.request.urlopen(req, timeout=timeout, context=SSL_CTX) as resp:
                 data = json.loads(resp.read().decode('utf-8'))
                 if not data.get("success"): return None
                 
-                region = self.parse_region(data.get("colo", ""))
-                isp = data.get("asOrganization", "Cloudflare")[:10]  # 提取运营商组织简称
-                
-                # 3. 真实速度
-                speed = self.test_speed(ip_port)
+                colo = data.get("colo", "OTHER").upper()
+                region = CF_COLO.get(colo, colo)
+                isp = data.get("asOrganization", "Cloudflare")[:8]
 
-                return {
-                    "ip": ip_port,
-                    "region": region,
-                    "isp": isp,
-                    "tls": tls_delay,
-                    "speed": speed
-                }
+            # 3. 真实测速 (100KB小包)
+            speed = 0.0
+            try:
+                proxy_h = urllib.request.ProxyHandler({'http': f'http://{ip_port}', 'https': f'http://{ip_port}'})
+                opener = urllib.request.build_opener(proxy_h)
+                s_req = urllib.request.Request("https://speed.cloudflare.com/__down?bytes=102400", headers={'User-Agent': 'Mozilla/5.0'})
+                st = time.time()
+                with opener.open(s_req, timeout=1.5) as s_resp:
+                    buf = s_resp.read()
+                    dur = time.time() - st
+                    if dur > 0 and len(buf) > 0:
+                        speed = round((len(buf) / 1024) / dur, 1)
+            except Exception:
+                pass
+
+            return {
+                "ip": ip_port,
+                "region": region,
+                "isp": isp,
+                "tls": tls_delay,
+                "speed": speed
+            }
         except Exception:
             return None
 
-    def start_scan(self, instance):
+    def toggle_scan(self, instance):
+        if self.is_running:
+            return
+        self.is_running = True
         self.scan_btn.disabled = True
-        self.status_label.text = "STATUS: SCANNING..."
-        self.result_text.text = ""
+        self.scan_btn.text = "扫描中..."
+        self.result_box.text = ""
         self.valid_ips = []
-        threading.Thread(target=self._async_scan, daemon=True).start()
+        threading.Thread(target=self.run_scan_task, daemon=True).start()
 
-    def _async_scan(self):
-        targets = self.parse_ips(self.input_text.text)
+    def run_scan_task(self):
+        targets = self.expand_ips(self.ip_input.text)
         if not targets:
-            Clock.schedule_once(lambda dt: self._update_status("NO IP DETECTED!", False))
+            Clock.schedule_once(lambda dt: self.finish_scan("未解析到有效IP！", False))
             return
 
         results = []
         total = len(targets)
 
-        for idx, ip in enumerate(targets, 1):
-            Clock.schedule_once(lambda dt, i=idx, t=total: self._update_status(f"SCANNING ({i}/{t})...", True))
-            res = self.check_one_ip(ip)
+        for i, target in enumerate(targets, 1):
+            Clock.schedule_once(lambda dt, idx=i, t=total: setattr(self.status_lbl, 'text', f"正在检测: 进度 ({idx}/{t})"))
+            res = self.test_node(target)
             if res:
                 results.append(res)
-                log_line = f"[+] {res['ip']:<19} | {res['region']:<4} | {res['isp']:<10} | TLS:{res['tls']}ms | {res['speed']}KB/s\n"
-                Clock.schedule_once(lambda dt, line=log_line: self._append_result(line))
+                line = f"✔ {res['ip']} | {res['region']} | {res['isp']} | TLS:{res['tls']}ms | {res['speed']}KB/s\n"
+                Clock.schedule_once(lambda dt, l=line: self.append_log(l))
 
-        # 按 TLS 延迟升序排序
         results.sort(key=lambda x: x["tls"])
         self.valid_ips = [r["ip"] for r in results]
+        
+        msg = f"扫描完成！找到 {len(self.valid_ips)} 个可用节点"
+        Clock.schedule_once(lambda dt: self.finish_scan(msg, False))
 
-        final_msg = f"SCAN DONE: {len(self.valid_ips)} ONLINE"
-        Clock.schedule_once(lambda dt: self._update_status(final_msg, False))
+    def append_log(self, line):
+        self.result_box.text += line
 
-    def _update_status(self, text, is_scanning):
-        self.status_label.text = f"STATUS: {text}"
-        if not is_scanning:
-            self.scan_btn.disabled = False
+    def finish_scan(self, msg, status):
+        self.status_lbl.text = f"状态: {msg}"
+        self.scan_btn.disabled = False
+        self.scan_btn.text = "开始扫描"
+        self.is_running = status
 
-    def _append_result(self, line):
-        self.result_text.text += line
-
-    def copy_results(self, instance):
+    def copy_ips(self, instance):
         if self.valid_ips:
-            text_to_copy = "\n".join(self.valid_ips)
-            Clipboard.copy(text_to_copy)
-            self.status_label.text = "COPIED TO CLIPBOARD!"
+            Clipboard.copy("\n".join(self.valid_ips))
+            self.status_lbl.text = "状态: 已成功将可用 IP 复制到剪贴板！"
         else:
-            self.status_label.text = "NO VALID IP TO COPY"
+            self.status_lbl.text = "状态: 当前没有可用 IP 可供复制"
+
 
 if __name__ == "__main__":
-    CyberApp().run()
+    ProScannerApp().run()
