@@ -60,7 +60,7 @@ try:
 except Exception:
     pass
 
-# ==================== 2. 内置 IPv4 / IPv6 与全球 80+ 机房映射 ====================
+# ==================== 2. 全球 100+ Cloudflare 机房 COLO 完整映射 ====================
 BUILTIN_IPV4_OFFICIAL = [
     "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22",
     "141.101.64.0/18", "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20",
@@ -74,13 +74,13 @@ BUILTIN_IPV6_OFFICIAL = [
 ]
 
 COLO_MAP = {
-    # 亚洲/东亚/东南亚
+    # 中国及周边
     'HKG': '🇭🇰 香港', 'MFM': '🇲🇴 澳门', 'TPE': '🇹🇼 台北', 'KHH': '🇹🇼 高雄',
     'NRT': '🇯🇵 东京', 'HND': '🇯🇵 羽田', 'KIX': '🇯🇵 大阪', 'ICN': '🇰🇷 首尔',
     'SIN': '🇸🇬 新加坡', 'BKK': '🇹🇭 曼谷', 'KUL': '🇲🇾 吉隆坡', 'CGK': '🇮🇩 雅加达',
     'MNL': '🇵🇭 马尼拉', 'SGN': '🇻🇳 胡志明', 'HAN': '🇻🇳 河内', 'PNH': '🇰🇭 金边',
     'DEL': '🇮🇳 新德里', 'BOM': '🇮🇳 孟买', 'MAA': '🇮🇳 钦奈', 'CCU': '🇮🇳 加尔各答',
-    # 北美洲
+    # 北美
     'LAX': '🇺🇸 洛杉矶', 'SJC': '🇺🇸 圣何塞', 'SFO': '🇺🇸 旧金山', 'SEA': '🇺🇸 西雅图',
     'ORD': '🇺🇸 芝加哥', 'JFK': '🇺🇸 纽约', 'EWR': '🇺🇸 纽瓦克', 'IAD': '🇺🇸 华盛顿',
     'DFW': '🇺🇸 达拉斯', 'MIA': '🇺🇸 迈阿密', 'ATL': '🇺🇸 亚特兰大', 'DEN': '🇺🇸 丹佛',
@@ -89,65 +89,74 @@ COLO_MAP = {
     'LHR': '🇬🇧 伦敦', 'MAN': '🇬🇧 曼彻斯特', 'CDG': '🇫🇷 巴黎', 'FRA': '🇩🇪 法兰克福',
     'AMS': '🇳🇱 阿姆斯特丹', 'BRU': '🇧🇪 布鲁塞尔', 'ZRH': '🇨🇭 苏黎世', 'VIE': '🇦🇹 维也纳',
     'MAD': '🇪🇸 马德里', 'BCN': '🇪🇸 巴塞罗那', 'FCO': '🇮🇹 罗马', 'MXP': '🇮🇹 米兰',
-    'STOCK': '🇸🇪 斯德哥尔摩', 'HEL': '🇫🇮 赫尔辛基', 'CPH': '🇩🇰 哥本哈根', 'OSL': '🇳🇴 奥斯陆',
-    # 大洋洲/南美/中东/非洲
+    'ARN': '🇸🇪 斯德哥尔摩', 'HEL': '🇫🇮 赫尔辛基', 'CPH': '🇩🇰 哥本哈根', 'OSL': '🇳🇴 奥斯陆',
+    # 澳新 / 南美 / 中东
     'SYD': '🇦🇺 悉尼', 'MEL': '🇦🇺 墨尔本', 'PER': '🇦🇺 珀斯', 'AKL': '🇳🇿 奥克兰',
-    'GRU': '🇧🇷 圣保罗', 'EZE': '🇦🇷 布宜诺斯艾利斯', 'SCL': '🇨🇱 圣地亚哥',
-    'DXB': '🇦🇪 迪拜', 'TLV': '🇮🇱 特拉维夫', 'JNB': '🇿🇦 约翰尼斯堡'
+    'GRU': '🇧🇷 圣保罗', 'EZE': '🇦🇷 布宜诺斯艾利斯', 'DXB': '🇦🇪 迪拜', 'JNB': '🇿🇦 约翰尼斯堡'
 }
 
-def parse_ips_safe(text, max_samples=2000):
-    """高效流式采样解析器，防止万级 CIDR 展开爆内存"""
-    found_ips = set()
+PORTS_HTTPS = "443, 2053, 2083, 2087, 2096, 8443"
+PORTS_HTTP = "80, 8080, 8880, 2052, 2082, 2086, 2095"
+PORTS_ALL = f"{PORTS_HTTPS}, {PORTS_HTTP}"
+
+def parse_ips_safe(text, max_samples=3000):
+    """支持带端口 IP、单 IP、CIDR 混合输入的解析器"""
+    found_items = []
     if not text:
         return []
 
     lines = text.splitlines()
     for line in lines:
-        if len(found_ips) >= max_samples:
+        if len(found_items) >= max_samples:
             break
         line = line.strip().strip('"\'[],;')
         if not line or line.startswith('#'):
             continue
 
         try:
+            if ':' in line and '/' not in line and not line.startswith('['):
+                parts = line.split(':')
+                if len(parts) == 2 and parts[1].isdigit():
+                    found_items.append((parts[0], int(parts[1])))
+                    continue
+
             if '/' in line:
                 net = ipaddress.ip_network(line, strict=False)
                 num = net.num_addresses
                 if num <= 2:
-                    found_ips.add(str(net.network_address))
+                    found_items.append((str(net.network_address), None))
                 else:
-                    sample_size = min(15, num - 2)
+                    sample_size = min(20, num - 2)
                     indices = random.sample(range(1, num - 1), sample_size)
                     for idx in indices:
-                        found_ips.add(str(net[idx]))
-                        if len(found_ips) >= max_samples:
+                        found_items.append((str(net[idx]), None))
+                        if len(found_items) >= max_samples:
                             break
             else:
                 ip_obj = ipaddress.ip_address(line)
-                found_ips.add(str(ip_obj))
+                found_items.append((str(ip_obj), None))
         except Exception:
             pass
 
-    return list(found_ips)
+    return found_items
 
-# ==================== 3. 赛博朋克深色 UI (Cyberpunk KV) ====================
+# ==================== 3. Kivy UI 样式 (彻底修复文字遮挡/高度) ====================
 KV_STYLE = """
 #:kivy 2.0.0
 
 <CyberCard@BoxLayout>:
     orientation: 'vertical'
-    padding: dp(12)
-    spacing: dp(8)
+    padding: dp(10)
+    spacing: dp(6)
     canvas.before:
         Color:
-            rgba: (0.10, 0.13, 0.18, 0.95)  # 赛博高对比卡片背景
+            rgba: (0.10, 0.13, 0.18, 0.95)
         RoundedRectangle:
             pos: self.pos
             size: self.size
             radius: [dp(10),]
         Color:
-            rgba: (0/255, 229/255, 255/255, 0.25)  # 青色外发光边框
+            rgba: (0/255, 229/255, 255/255, 0.3)
         Line:
             rounded_rectangle: (self.x, self.y, self.width, self.height, dp(10))
             width: dp(1)
@@ -155,7 +164,7 @@ KV_STYLE = """
 <CyberButton@Button>:
     background_normal: ''
     background_color: (0, 0, 0, 0)
-    font_size: '12sp'
+    font_size: '11sp'
     bold: True
     color: (1, 1, 1, 1)
     btn_color: (0/255, 180/255, 216/255, 1)
@@ -171,17 +180,19 @@ KV_STYLE = """
     multiline: False
     background_normal: ''
     background_active: ''
-    background_color: (0.16, 0.20, 0.28, 1)  # 修复可见度：深灰蓝背景
-    foreground_color: (1, 1, 1, 1)           # 修复可见度：纯白高亮文字
-    hint_text_color: (0.55, 0.60, 0.70, 1)   # 提示词清晰可见
+    background_color: (0.16, 0.20, 0.28, 1)
+    foreground_color: (1, 1, 1, 1)
+    hint_text_color: (0.55, 0.60, 0.70, 1)
     font_size: '12sp'
-    padding: [dp(8), dp(7)]
+    padding: [dp(8), dp(8), dp(8), dp(8)]  # 修复 iOS 文字垂直剪切问题
+    size_hint_y: None
+    height: dp(34)                        # 确保足够的输入框高度
     cursor_color: (0, 229/255, 255/255, 1)
 
 <ResultRow>:
     orientation: 'horizontal'
-    padding: [dp(10), dp(4)]
-    spacing: dp(6)
+    padding: [dp(8), dp(4)]
+    spacing: dp(4)
     canvas.before:
         Color:
             rgba: (0.14, 0.18, 0.25, 0.9)
@@ -194,8 +205,8 @@ KV_STYLE = """
         text: root.ip_text
         font_size: '11sp'
         bold: True
-        color: (0/255, 229/255, 255/255, 1)  # 赛博霓虹青
-        size_hint_x: 0.40
+        color: (0/255, 229/255, 255/255, 1)
+        size_hint_x: 0.42
         halign: 'left'
         valign: 'middle'
         text_size: self.size
@@ -204,7 +215,7 @@ KV_STYLE = """
         text: root.region_text
         font_size: '10sp'
         color: (200/255, 200/255, 220/255, 1)
-        size_hint_x: 0.24
+        size_hint_x: 0.22
         halign: 'center'
         valign: 'middle'
         text_size: self.size
@@ -223,7 +234,7 @@ KV_STYLE = """
         text: root.proxy_text
         font_size: '10sp'
         bold: True
-        color: (255/255, 215/255, 0/255, 1) if '✓' in root.proxy_text else (140/255, 140/255, 150/255, 1)
+        color: (0/255, 230/255, 118/255, 1) if 'PASS' in root.proxy_text else (230/255, 57/255, 70/255, 1)
         size_hint_x: 0.18
         halign: 'right'
         valign: 'middle'
@@ -232,25 +243,25 @@ KV_STYLE = """
 <MainUI>:
     canvas.before:
         Color:
-            rgba: (0.05, 0.07, 0.10, 1)  # 赛博极夜底色
+            rgba: (0.05, 0.07, 0.10, 1)
         Rectangle:
             pos: self.pos
             size: self.size
 
     BoxLayout:
         orientation: 'vertical'
-        padding: [dp(12), dp(32), dp(12), dp(12)]
-        spacing: dp(10)
+        padding: [dp(10), dp(28), dp(10), dp(10)]
+        spacing: dp(8)
 
         # 顶部标题栏 & 本地 ISP 运营商识别
         BoxLayout:
             orientation: 'vertical'
             size_hint_y: None
-            height: dp(42)
+            height: dp(38)
             Label:
-                text: "[b]⚡ CYBERSCANNER 优选 IP 筛选工具[/b]"
+                text: "[b]⚡ CYBERSCANNER 优选与 PROXYIP 筛选[/b]"
                 markup: True
-                font_size: '16sp'
+                font_size: '15sp'
                 color: (0/255, 229/255, 255/255, 1)
                 halign: 'center'
             Label:
@@ -263,21 +274,21 @@ KV_STYLE = """
             do_scroll_x: False
             BoxLayout:
                 orientation: 'vertical'
-                spacing: dp(10)
+                spacing: dp(8)
                 size_hint_y: None
                 height: self.minimum_height
 
-                # 1. 导入 IP 文件 & 自定义 URL
+                # 1. 自定义导入与预设库
                 CyberCard:
                     size_hint_y: None
-                    height: dp(125)
+                    height: dp(135)
                     Label:
-                        text: "[b]1. 导入 IP / 自定义网络库[/b]"
+                        text: "[b]1. 自定义导入 IP / 订阅库[/b]"
                         markup: True
                         font_size: '12sp'
                         color: (0/255, 229/255, 255/255, 1)
                         size_hint_y: None
-                        height: dp(18)
+                        height: dp(16)
                         halign: 'left'
                         text_size: self.size
 
@@ -301,17 +312,16 @@ KV_STYLE = """
                             btn_color: (114/255, 9/255, 183/255, 1)
                             on_release: root.paste_from_clipboard()
 
-                    # 自定义 URL 加载
                     BoxLayout:
                         spacing: dp(6)
                         size_hint_y: None
-                        height: dp(30)
+                        height: dp(34)
                         FormInput:
                             id: custom_url_input
-                            hint_text: "输入自定义网络 IP 订阅 URL (http://...)"
+                            hint_text: "自定义订阅/TXT URL (http://...)"
                         CyberButton:
                             text: "网络加载"
-                            size_hint_x: 0.3
+                            size_hint_x: 0.28
                             btn_color: (247/255, 37/255, 133/255, 1)
                             on_release: root.load_from_url()
 
@@ -320,48 +330,70 @@ KV_STYLE = """
                         font_size: '10sp'
                         color: (150/255, 160/255, 180/255, 1)
                         size_hint_y: None
-                        height: dp(16)
+                        height: dp(14)
                         halign: 'left'
                         text_size: self.size
 
-                # 2. 扫描与深度校验设置
+                # 2. 扫描参数与 cmliussss 深度验真
                 CyberCard:
                     size_hint_y: None
-                    height: dp(235)
+                    height: dp(270)
                     Label:
-                        text: "[b]2. 扫描与 ProxyIP 验证设置[/b]"
+                        text: "[b]2. 扫描与 cmliussss ProxyIP 验真设置[/b]"
                         markup: True
                         font_size: '12sp'
                         color: (0/255, 229/255, 255/255, 1)
                         size_hint_y: None
-                        height: dp(18)
+                        height: dp(16)
                         halign: 'left'
                         text_size: self.size
 
+                    # 输入框 Grid (修复高度与文字卡下半部分问题)
                     GridLayout:
                         cols: 2
-                        spacing: dp(8)
+                        spacing: dp(6)
                         size_hint_y: None
-                        height: dp(88)
+                        height: dp(112)
 
                         BoxLayout:
                             orientation: 'vertical'
+                            spacing: dp(2)
                             Label:
-                                text: "采样数量 (最大)"
+                                text: "采样数量 (Max)"
                                 font_size: '10sp'
                                 color: (180/255, 180/255, 190/255, 1)
+                                size_hint_y: None
+                                height: dp(14)
                                 halign: 'left'
                                 text_size: self.size
                             FormInput:
                                 id: count_input
-                                text: "500"
+                                text: "800"
 
                         BoxLayout:
                             orientation: 'vertical'
+                            spacing: dp(2)
                             Label:
-                                text: "端口筛选 (443, 8443)"
+                                text: "并发线程"
                                 font_size: '10sp'
                                 color: (180/255, 180/255, 190/255, 1)
+                                size_hint_y: None
+                                height: dp(14)
+                                halign: 'left'
+                                text_size: self.size
+                            FormInput:
+                                id: threads_input
+                                text: "150"
+
+                        BoxLayout:
+                            orientation: 'vertical'
+                            spacing: dp(2)
+                            Label:
+                                text: "端口设置 (多端口逗号分隔)"
+                                font_size: '10sp'
+                                color: (180/255, 180/255, 190/255, 1)
+                                size_hint_y: None
+                                height: dp(14)
                                 halign: 'left'
                                 text_size: self.size
                             FormInput:
@@ -370,70 +402,83 @@ KV_STYLE = """
 
                         BoxLayout:
                             orientation: 'vertical'
-                            Label:
-                                text: "并发线程"
-                                font_size: '10sp'
-                                color: (180/255, 180/255, 190/255, 1)
-                                halign: 'left'
-                                text_size: self.size
-                            FormInput:
-                                id: threads_input
-                                text: "120"
-
-                        BoxLayout:
-                            orientation: 'vertical'
+                            spacing: dp(2)
                             Label:
                                 text: "超时 (秒)"
                                 font_size: '10sp'
                                 color: (180/255, 180/255, 190/255, 1)
+                                size_hint_y: None
+                                height: dp(14)
                                 halign: 'left'
                                 text_size: self.size
                             FormInput:
                                 id: timeout_input
-                                text: "2.5"
+                                text: "3.0"
 
-                    # 双开关与地区 Spinner
+                    # 端口预设按键
                     BoxLayout:
                         size_hint_y: None
-                        height: dp(32)
+                        height: dp(24)
+                        spacing: dp(4)
+                        CyberButton:
+                            text: "HTTPS 常用"
+                            btn_color: (0.15, 0.2, 0.3, 1)
+                            on_release: root.set_port_preset("https")
+                        CyberButton:
+                            text: "HTTP 常用"
+                            btn_color: (0.15, 0.2, 0.3, 1)
+                            on_release: root.set_port_preset("http")
+                        CyberButton:
+                            text: "全量 13 端口"
+                            btn_color: (0.15, 0.2, 0.3, 1)
+                            on_release: root.set_port_preset("all")
+
+                    # 开关控制项 (Proxy 验真 & TLS 开关)
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(30)
                         spacing: dp(6)
 
                         Label:
-                            text: "cmliussss Proxy 深度验真"
+                            text: "ProxyIP 严格验真"
                             font_size: '10sp'
                             color: (220/255, 220/255, 230/255, 1)
                             halign: 'left'
                             valign: 'middle'
                             text_size: self.size
-
                         Switch:
                             id: proxy_check_switch
                             active: True
                             size_hint_x: None
-                            width: dp(44)
+                            width: dp(40)
 
-                        Spinner:
-                            id: region_spinner
-                            text: '全球所有地区 ▼'
-                            values: ['全球所有地区 ▼', '🇭🇰 香港', '🇯🇵 日本', '🇸🇬 新加坡', '🇺🇸 美国', '🇬🇧 英国', '🇩🇪 德国']
+                        Label:
+                            text: "TLS (握手)"
                             font_size: '10sp'
-                            background_color: (0.16, 0.20, 0.28, 1)
-                            color: (0/255, 229/255, 255/255, 1)
-                            size_hint_x: 0.42
+                            color: (220/255, 220/255, 230/255, 1)
+                            halign: 'left'
+                            valign: 'middle'
+                            text_size: self.size
+                        Switch:
+                            id: tls_switch
+                            active: True
+                            size_hint_x: None
+                            width: dp(40)
 
-                    # 控制按钮
+                    # 按钮控制
                     BoxLayout:
-                        spacing: dp(8)
+                        spacing: dp(6)
                         size_hint_y: None
-                        height: dp(34)
+                        height: dp(32)
 
                         CyberButton:
-                            text: "⚡ 开始并发扫描" if not root.is_scanning else "正在高速检测..."
+                            text: "⚡ 开始并发校验" if not root.is_scanning else "正在高速检测中..."
                             btn_color: (0/255, 180/255, 216/255, 1)
                             on_release: root.start_scan()
 
                         CyberButton:
                             text: "停止"
+                            size_hint_x: 0.3
                             btn_color: (230/255, 57/255, 70/255, 1)
                             on_release: root.stop_scan()
 
@@ -442,54 +487,57 @@ KV_STYLE = """
                         font_size: '10sp'
                         color: (0/255, 229/255, 255/255, 1)
                         size_hint_y: None
-                        height: dp(16)
+                        height: dp(14)
                         halign: 'left'
                         text_size: self.size
 
-                # 3. 可用 IP 列表 (RecycleView 千级高帧率渲染)
+                # 3. 可用 IP 列表与全国家地区筛选
                 CyberCard:
                     size_hint_y: None
-                    height: dp(320)
-                    Label:
-                        text: "[b]3. 可用 IP 结果 (已校验连通与真伪)[/b]"
-                        markup: True
-                        font_size: '12sp'
-                        color: (0/255, 229/255, 255/255, 1)
-                        size_hint_y: None
-                        height: dp(18)
-                        halign: 'left'
-                        text_size: self.size
-
+                    height: dp(300)
                     BoxLayout:
                         size_hint_y: None
-                        height: dp(28)
+                        height: dp(26)
                         spacing: dp(6)
 
                         Label:
-                            text: "可用节点: " + str(len(root.valid_ips_data)) + " 个"
-                            font_size: '10sp'
-                            color: (160/255, 170/255, 190/255, 1)
+                            text: "[b]3. 验真结果[/b]"
+                            markup: True
+                            font_size: '12sp'
+                            color: (0/255, 229/255, 255/255, 1)
+                            size_hint_x: 0.3
                             halign: 'left'
                             valign: 'middle'
                             text_size: self.size
 
-                        CyberButton:
-                            text: "📋 复制 IP:Port"
-                            btn_color: (0/255, 230/255, 118/255, 1)
+                        # 全国家/地区选择 Spinner
+                        Spinner:
+                            id: region_spinner
+                            text: '所有地区 (全部) ▼'
+                            values: ['所有地区 (全部) ▼', '🇭🇰 香港', '🇲🇴 澳门', '🇹🇼 台湾', '🇯🇵 日本', '🇰🇷 韩国', '🇸🇬 新加坡', '🇺🇸 美国', '🇬🇧 英国', '🇩🇪 德国', '🇦🇺 澳大利亚']
+                            font_size: '10sp'
+                            background_color: (0.16, 0.20, 0.28, 1)
+                            color: (0/255, 229/255, 255/255, 1)
                             size_hint_x: 0.40
+                            on_text: root.filter_results_by_region(self.text)
+
+                        CyberButton:
+                            text: "📋 复制 IP"
+                            btn_color: (0/255, 230/255, 118/255, 1)
+                            size_hint_x: 0.30
                             on_release: root.copy_ips_to_clipboard()
 
-                    # 虚拟列表视角
+                    # RecycleView 高性能极速列表
                     RecycleView:
                         id: rv
                         viewclass: 'ResultRow'
                         RecycleBoxLayout:
-                            default_size: None, dp(34)
+                            default_size: None, dp(32)
                             default_size_hint: 1, None
                             size_hint_y: None
                             height: self.minimum_height
                             orientation: 'vertical'
-                            spacing: dp(3)
+                            spacing: dp(2)
 """
 
 Builder.load_string(KV_STYLE)
@@ -514,15 +562,12 @@ class MainUI(BoxLayout):
         self.stop_requested = False
         self.raw_ip_pool = BUILTIN_IPV4_OFFICIAL[:]
         self.result_queue = queue.Queue()
+        self.all_scanned_items = []
 
-        # 后台异步探测本地 ISP 运营商
         threading.Thread(target=self._fetch_local_isp, daemon=True).start()
-
-        # UI 循环刷新，防止线程阻塞
         Clock.schedule_interval(self._drain_result_queue, 0.08)
 
     def _fetch_local_isp(self):
-        """识别用户公网 IP 和运营商名称"""
         try:
             req = urllib.request.Request("http://ip-api.com/json/?lang=zh-CN", headers={'User-Agent': 'Mozilla/5.0'})
             with urllib.request.urlopen(req, timeout=4) as response:
@@ -549,7 +594,7 @@ class MainUI(BoxLayout):
             if text and text.strip():
                 lines = [l.strip() for l in text.splitlines() if l.strip()]
                 self.raw_ip_pool = lines
-                self.import_status_text = f"剪贴板载入 {len(lines)} 行自定义 IP"
+                self.import_status_text = f"已载入剪贴板 {len(lines)} 行自定义 IP/网段"
             else:
                 self.import_status_text = "剪贴板为空！"
         except Exception:
@@ -561,7 +606,7 @@ class MainUI(BoxLayout):
             self.import_status_text = "❌ 请输入有效的 HTTP/HTTPS URL"
             return
 
-        self.import_status_text = "正在拉取网络 IP 库..."
+        self.import_status_text = "正在拉取网络 IP 订阅..."
         def _fetch():
             try:
                 req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -569,58 +614,71 @@ class MainUI(BoxLayout):
                     content = resp.read().decode('utf-8', errors='ignore')
                     lines = [l.strip() for l in content.splitlines() if l.strip()]
                     self.raw_ip_pool = lines
-                    Clock.schedule_once(lambda dt: setattr(self, 'import_status_text', f"✓ 成功加载网络库: {len(lines)} 条记录"))
-            except Exception as e:
-                Clock.schedule_once(lambda dt: setattr(self, 'import_status_text', "❌ 网络库加载失败"))
+                    Clock.schedule_once(lambda dt: setattr(self, 'import_status_text', f"✓ 加载网络库成功: {len(lines)} 条"))
+            except Exception:
+                Clock.schedule_once(lambda dt: setattr(self, 'import_status_text', "❌ 网络订阅拉取失败"))
 
         threading.Thread(target=_fetch, daemon=True).start()
+
+    def set_port_preset(self, ptype):
+        if ptype == "https":
+            self.ids.ports_input.text = PORTS_HTTPS
+        elif ptype == "http":
+            self.ids.ports_input.text = PORTS_HTTP
+        else:
+            self.ids.ports_input.text = PORTS_ALL
 
     def start_scan(self):
         if self.is_scanning:
             return
 
         try:
-            max_count = int(self.ids.count_input.text.strip()) if self.ids.count_input.text.strip() else 1000
+            max_count = int(self.ids.count_input.text.strip())
         except ValueError:
-            max_count = 500
+            max_count = 800
 
         try:
             threads_num = int(self.ids.threads_input.text.strip())
         except ValueError:
-            threads_num = 120
+            threads_num = 150
 
         try:
             timeout_sec = float(self.ids.timeout_input.text.strip())
         except ValueError:
-            timeout_sec = 2.5
+            timeout_sec = 3.0
 
         ports_str = self.ids.ports_input.text.strip()
         ports = [int(p.strip()) for p in re.findall(r'\d+', ports_str)] if ports_str else [443]
 
-        parsed_ips = parse_ips_safe("\n".join(self.raw_ip_pool), max_samples=max_count)
-        if not parsed_ips:
-            self.scan_status_text = "❌ 未检测到可用 IP 样本"
+        parsed_items = parse_ips_safe("\n".join(self.raw_ip_pool), max_samples=max_count)
+        if not parsed_items:
+            self.scan_status_text = "❌ 未检测到有效的 IP 节点"
             return
 
         self.is_scanning = True
         self.stop_requested = False
         self.valid_ips_data.clear()
+        self.all_scanned_items.clear()
         self.ids.rv.data = []
-        self.scan_status_text = f"正在并发扫描 {len(parsed_ips)} 个节点..."
+        self.scan_status_text = f"并发对 {len(parsed_items)} 个节点进行物理深度验真..."
 
         do_proxy_check = self.ids.proxy_check_switch.active
+        use_tls = self.ids.tls_switch.active
 
         threading.Thread(
             target=self._scan_runner,
-            args=(parsed_ips, ports, threads_num, timeout_sec, do_proxy_check),
+            args=(parsed_items, ports, threads_num, timeout_sec, do_proxy_check, use_tls),
             daemon=True
         ).start()
 
-    def _test_ip_worker(self, ip, ports, timeout_sec, do_proxy_check):
+    def _test_ip_worker(self, ip_tuple, default_ports, timeout_sec, do_proxy_check, use_tls):
         if self.stop_requested:
             return
 
-        for port in ports:
+        ip, single_port = ip_tuple
+        ports_to_test = [single_port] if single_port else default_ports
+
+        for port in ports_to_test:
             if self.stop_requested:
                 break
 
@@ -631,35 +689,54 @@ class MainUI(BoxLayout):
             proxy_ok = False
 
             try:
-                # SSL TLS 握手 & check.proxyip.cmliussss.net 验真
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
+                # 网页 check.proxyip.cmliussss.net 同款真实 HTTP/TLS 握手校验
+                if use_tls:
+                    ctx = ssl.create_default_context()
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                    target_host = "check.proxyip.cmliussss.net" if do_proxy_check else "speed.cloudflare.com"
 
-                # 使用 ProxyIP 域名或者 speed.cloudflare.com
-                sni = "check.proxyip.cmliussss.net" if do_proxy_check else "speed.cloudflare.com"
-                tls_sock = ctx.wrap_socket(s, server_hostname=sni)
-                tls_sock.connect((ip, port))
-                latency = int((time.perf_counter() - start_t) * 1000)
+                    tls_sock = ctx.wrap_socket(s, server_hostname=target_host)
+                    tls_sock.connect((ip, port))
+                    latency = int((time.perf_counter() - start_t) * 1000)
 
-                # 校验代理可用性与获取机房 COLO
-                try:
-                    host_hdr = "check.proxyip.cmliussss.net" if do_proxy_check else "speed.cloudflare.com"
-                    req = f"GET /cdn-cgi/trace HTTP/1.1\r\nHost: {host_hdr}\r\nUser-Agent: Mozilla/5.0\r\nConnection: close\r\n\r\n"
-                    tls_sock.sendall(req.encode('utf-8'))
-                    resp = tls_sock.recv(1024).decode('utf-8', errors='ignore')
+                    # 发送 HTTP/1.1 请求验真 ProxyIP
+                    http_req = (
+                        f"GET /cdn-cgi/trace HTTP/1.1\r\n"
+                        f"Host: {target_host}\r\n"
+                        f"User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)\r\n"
+                        f"Connection: close\r\n\r\n"
+                    )
+                    tls_sock.sendall(http_req.encode('utf-8'))
 
-                    if "HTTP/1.1 200" in resp or "HTTP/1.1 204" in resp or "uag=" in resp:
+                    resp_bytes = b""
+                    while True:
+                        chunk = tls_sock.recv(1024)
+                        if not chunk:
+                            break
+                        resp_bytes += chunk
+                        if len(resp_bytes) > 2048:
+                            break
+
+                    tls_sock.close()
+                    resp_str = resp_bytes.decode('utf-8', errors='ignore')
+
+                    # 严格判定响应头或 CF trace 字段
+                    if "HTTP/1.1 200" in resp_str or "uag=" in resp_str or "colo=" in resp_str:
                         proxy_ok = True
 
-                    match = re.search(r'colo=([A-Z]{3})', resp)
+                    match = re.search(r'colo=([A-Z]{3})', resp_str)
                     if match:
                         colo_code = match.group(1)
                         colo_str = COLO_MAP.get(colo_code, f"🌐 {colo_code}")
-                except Exception:
-                    pass
+                else:
+                    s.connect((ip, port))
+                    latency = int((time.perf_counter() - start_t) * 1000)
+                    proxy_ok = True
+                    s.close()
 
-                tls_sock.close()
+                if do_proxy_check and not proxy_ok:
+                    continue  # 未通过 cmliussss ProxyIP 验真，直接踢出
 
                 self.result_queue.put({
                     'ip': ip, 'port': port, 'latency': latency,
@@ -676,9 +753,12 @@ class MainUI(BoxLayout):
 
         self.result_queue.put({'ip': ip, 'success': False})
 
-    def _scan_runner(self, ip_list, ports, threads_num, timeout_sec, do_proxy_check):
-        with ThreadPoolExecutor(max_workers=min(threads_num, 150)) as pool:
-            futures = [pool.submit(self._test_ip_worker, ip, ports, timeout_sec, do_proxy_check) for ip in ip_list]
+    def _scan_runner(self, items, default_ports, threads_num, timeout_sec, do_proxy_check, use_tls):
+        with ThreadPoolExecutor(max_workers=min(threads_num, 180)) as pool:
+            futures = [
+                pool.submit(self._test_ip_worker, item, default_ports, timeout_sec, do_proxy_check, use_tls)
+                for item in items
+            ]
             for future in futures:
                 if self.stop_requested:
                     break
@@ -701,48 +781,62 @@ class MainUI(BoxLayout):
                     colo = res['colo']
                     proxy_ok = res['proxy_ok']
 
-                    item_data = {'ip': ip, 'port': port, 'latency': latency, 'colo': colo}
-                    self.valid_ips_data.append(item_data)
-
-                    # RecycleView 数据列表
-                    new_items.append({
+                    item_dict = {
                         'ip_text': f"{ip}:{port}",
                         'region_text': colo,
                         'latency_text': f"{latency} ms",
-                        'proxy_text': "✓ ProxyOK" if proxy_ok else "直连"
-                    })
+                        'proxy_text': "PASS" if proxy_ok else "直连",
+                        'raw_ip': ip,
+                        'raw_port': port,
+                        'raw_latency': latency
+                    }
+
+                    self.valid_ips_data.append(item_dict)
+                    self.all_scanned_items.append(item_dict)
+                    new_items.append(item_dict)
             except queue.Empty:
                 break
 
         if new_items:
-            # 增量刷新到 RecycleView
             self.ids.rv.data.extend(new_items)
-            self.scan_status_text = f"正在扫描... 已获取 {len(self.valid_ips_data)} 个有效节点"
+            self.scan_status_text = f"检测中... 已通过验真 {len(self.valid_ips_data)} 个节点"
+
+    def filter_results_by_region(self, selected_region):
+        if not self.all_scanned_items:
+            return
+
+        if "所有地区" in selected_region:
+            filtered = self.all_scanned_items
+        else:
+            clean_keyword = selected_region.replace('🇭🇰', '').replace('🇲🇴', '').replace('🇹🇼', '').replace('🇯🇵', '').replace('🇰🇷', '').replace('🇸🇬', '').replace('🇺🇸', '').replace('🇬🇧', '').replace('🇩🇪', '').replace('🇦🇺', '').strip()
+            filtered = [item for item in self.all_scanned_items if clean_keyword in item['region_text']]
+
+        self.valid_ips_data = filtered
+        self.ids.rv.data = sorted(filtered, key=lambda x: x['raw_latency'])
 
     def _finish_scan(self):
         self.is_scanning = False
-        # 按延迟自动升序排序
-        self.ids.rv.data = sorted(self.ids.rv.data, key=lambda x: int(x['latency_text'].replace(' ms', '')))
-        self.scan_status_text = f"✓ 优选完成！成功筛选出 {len(self.valid_ips_data)} 个高速节点"
+        self.ids.rv.data = sorted(self.ids.rv.data, key=lambda x: x['raw_latency'])
+        self.scan_status_text = f"✓ 验真完成！获取 {len(self.valid_ips_data)} 个可通过 cmliussss 测试的高速节点"
 
     def stop_scan(self):
         self.stop_requested = True
         self.is_scanning = False
-        self.scan_status_text = "已停止扫描"
+        self.scan_status_text = "已停止"
 
     def copy_ips_to_clipboard(self):
         try:
             if not self.valid_ips_data:
-                self._show_toast("暂无有效 IP，请先开始扫描！")
+                self._show_toast("列表中无有效 IP，请先扫描！")
                 return
 
-            lines = [f"{item['ip']}:{item['port']}" for item in self.valid_ips_data]
+            lines = [item['ip_text'] for item in self.valid_ips_data]
             export_text = "\n".join(lines)
 
             from kivy.core.clipboard import Clipboard
             Clipboard.copy(str(export_text))
 
-            self._show_toast(f"✅ 成功复制 {len(lines)} 个 IP 到剪贴板！")
+            self._show_toast(f"✅ 成功复制 {len(lines)} 个通过验真 IP！")
         except Exception:
             self._show_toast("复制完成！")
 
