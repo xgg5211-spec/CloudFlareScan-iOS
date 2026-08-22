@@ -1,3 +1,4 @@
+```yaml
 name: Build IPSelector
 
 on:
@@ -19,7 +20,7 @@ jobs:
       - name: Install deps
         run: |
           brew install zsign
-          pip3 install pyyaml maxminddb-geolite2
+          pip3 install pyyaml maxminddb-geolite2 --break-system-packages
 
       - name: Download GeoIP
         run: |
@@ -31,14 +32,16 @@ jobs:
         run: |
           cat > main.py << 'PYEOF'
           #!/usr/bin/env python3
-          import asyncio, time
+          import asyncio
+          import time
           from pathlib import Path
           from dataclasses import dataclass
-          import yaml, maxminddb
-          
+          import yaml
+          import maxminddb
+
           CITY_DB = Path("geoip/GeoLite2-City.mmdb")
           ASN_DB = Path("geoip/GeoLite2-ASN.mmdb")
-          
+
           @dataclass
           class Node:
               ip: str
@@ -51,54 +54,57 @@ jobs:
               tls_ms: int
               http_ms: int
               score: float
-          
+
           def geo(ip):
-              c = r = isp = ""
+              c = ""
+              r = ""
+              isp = ""
               try:
                   if CITY_DB.exists():
                       d = maxminddb.open_database(str(CITY_DB))
                       rec = d.get(ip)
                       if rec:
-                          c = rec.get("country", {}).get("names", {}).get("zh-CN") or rec.get("country", {}).get("iso_code", "")
-                          r = rec.get("subdivisions", [{}])[0].get("names", {}).get("zh-CN") or ""
+                          c = rec.get("country", {}).get("names", {}).get("zh-CN", "") or rec.get("country", {}).get("iso_code", "")
+                          r = rec.get("subdivisions", [{}])[0].get("names", {}).get("zh-CN", "") or ""
                   if ASN_DB.exists():
                       d = maxminddb.open_database(str(ASN_DB))
                       rec = d.get(ip)
                       if rec:
                           isp = rec.get("autonomous_system_organization", "")
-              except Exception:
-                  pass
+              except Exception as e:
+                  print(f"Geo error: {e}")
               return c, r, isp
-          
+
           async def tcp_ping(ip, port):
               try:
                   s = time.perf_counter()
                   _, w = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=3)
                   w.close()
                   await w.wait_closed()
-                  return int((time.perf_counter() - s) * 100)
+                  return int((time.perf_counter() - s) * 1000)
               except Exception:
                   return 9999
-          
+
           async def test_ip(ip, port):
               c, r, isp = geo(ip)
               tcp = await tcp_ping(ip, port)
               tls = tcp + 5
               http = tcp + 10
               score = tcp + tls + http
-              return Node(ip=ip, port=port, name=f"{c}-{r}-{isp}", country=c, region=r, isp=isp, tcp_ms=tcp, tls_ms=tls, http_ms=http, score=score)
-          
+              name = f"{c}-{r}-{isp}" if c else ip
+              return Node(ip=ip, port=port, name=name, country=c, region=r, isp=isp, tcp_ms=tcp, tls_ms=tls, http_ms=http, score=score)
+
           async def main():
               targets = [("104.16.0.1", 443), ("1.0.0.1", 443), ("8.8.8.8", 443)]
               sem = asyncio.Semaphore(50)
-              
+
               async def run(t):
                   async with sem:
                       return await test_ip(t[0], t[1])
-              
+
               results = await asyncio.gather(*[run(t) for t in targets])
               results.sort(key=lambda x: x.score)
-              
+
               proxies = []
               for i, r in enumerate(results):
                   proxies.append({
@@ -111,12 +117,12 @@ jobs:
                       "sni": r.ip,
                       "skip-cert-verify": True
                   })
-              
+
               with open("result.yaml", "w") as f:
                   yaml.dump({"proxies": proxies}, f, allow_unicode=True, default_flow_style=False)
-              
+
               print(f"Done: {len(proxies)} proxies")
-          
+
           asyncio.run(main())
           PYEOF
           chmod +x main.py
@@ -144,7 +150,14 @@ jobs:
           EOF
           cat > IPSelector/Sources/App.swift << 'EOF'
           import SwiftUI
-          @main struct App: App { var body: some Scene { WindowGroup { ContentView() } } }
+          @main
+          struct App: App {
+              var body: some Scene {
+                  WindowGroup {
+                      ContentView()
+                  }
+              }
+          }
           EOF
           cat > IPSelector/Sources/ProxyNode.swift << 'EOF'
           import Foundation
@@ -172,7 +185,9 @@ jobs:
                           Spacer()
                           Text("\(node.country) \(node.isp)").foregroundStyle(.cyan)
                           Text("\(node.latency)ms").foregroundStyle(node.latency < 200 ? .green : .orange)
-                          Button { UIPasteboard.general.string = "\(node.ip):\(node.port)" } label: {
+                          Button {
+                              UIPasteboard.general.string = "\(node.ip):\(node.port)"
+                          } label: {
                               Image(systemName: "square.on.square").foregroundStyle(.cyan)
                           }
                       }
@@ -211,3 +226,4 @@ jobs:
           files: |
             signed.ipa
             result.yaml
+```
