@@ -28,13 +28,13 @@ jobs:
 
       - name: Create Complete Xcode Project
         run: |
-          # 创建目录结构
+          # 创建目录
           mkdir -p CloudFlareScan
           mkdir -p CloudFlareScan.xcodeproj
           mkdir -p CloudFlareScan/Assets.xcassets/AppIcon.appiconset
           mkdir -p CloudFlareScan/Assets.xcassets/AccentColor.colorset
 
-          # ========== 1. Info.plist ==========
+          # ========== Info.plist ==========
           cat > CloudFlareScan/Info.plist << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -45,13 +45,13 @@ jobs:
               <key>CFBundleExecutable</key>
               <string>$(EXECUTABLE_NAME)</string>
               <key>CFBundleIdentifier</key>
-              <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+              <string>com.cloudflarescan.ios</string>
               <key>CFBundleInfoDictionaryVersion</key>
               <string>6.0</string>
               <key>CFBundleName</key>
               <string>$(PRODUCT_NAME)</string>
               <key>CFBundlePackageType</key>
-              <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+              <string>APPL</string>
               <key>CFBundleShortVersionString</key>
               <string>1.0</string>
               <key>CFBundleVersion</key>
@@ -62,23 +62,6 @@ jobs:
               <dict>
                   <key>NSAllowsArbitraryLoads</key>
                   <true/>
-              </dict>
-              <key>UIApplicationSceneManifest</key>
-              <dict>
-                  <key>UIApplicationSupportsMultipleScenes</key>
-                  <false/>
-                  <key>UISceneConfigurations</key>
-                  <dict>
-                      <key>UIWindowSceneSessionRoleApplication</key>
-                      <array>
-                          <dict>
-                              <key>UISceneConfigurationName</key>
-                              <string>Default Configuration</string>
-                              <key>UISceneDelegateClassName</key>
-                              <string>$(PRODUCT_MODULE_NAME).SceneDelegate</string>
-                          </dict>
-                      </array>
-                  </dict>
               </dict>
               <key>UILaunchScreen</key>
               <dict/>
@@ -94,7 +77,7 @@ jobs:
           </plist>
           EOF
 
-          # ========== 2. AppDelegate.swift ==========
+          # ========== AppDelegate.swift ==========
           cat > CloudFlareScan/AppDelegate.swift << 'EOF'
           import UIKit
           import SwiftUI
@@ -110,34 +93,10 @@ jobs:
                   window.makeKeyAndVisible()
                   return true
               }
-
-              func application(_ application: UIApplication, configurationForConnecting connectingSceneSession: UISceneSession, options: UIScene.ConnectionOptions) -> UISceneConfiguration {
-                  return UISceneConfiguration(name: "Default Configuration", sessionRole: connectingSceneSession.role)
-              }
           }
           EOF
 
-          # ========== 3. SceneDelegate.swift ==========
-          cat > CloudFlareScan/SceneDelegate.swift << 'EOF'
-          import UIKit
-          import SwiftUI
-
-          class SceneDelegate: UIResponder, UIWindowSceneDelegate {
-              var window: UIWindow?
-
-              func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
-                  let contentView = ContentView()
-                  if let windowScene = scene as? UIWindowScene {
-                      let window = UIWindow(windowScene: windowScene)
-                      window.rootViewController = UIHostingController(rootView: contentView)
-                      self.window = window
-                      window.makeKeyAndVisible()
-                  }
-              }
-          }
-          EOF
-
-          # ========== 4. ContentView.swift（完整功能版） ==========
+          # ========== ContentView.swift（完整功能版） ==========
           cat > CloudFlareScan/ContentView.swift << 'EOF'
           import SwiftUI
           import Network
@@ -148,15 +107,6 @@ jobs:
               case tls = "TLS握手"
               case http = "HTTP响应"
               case full = "完整链路"
-
-              var icon: String {
-                  switch self {
-                  case .tcp: return "arrow.triangle.2.circlepath"
-                  case .tls: return "lock.shield"
-                  case .http: return "globe"
-                  case .full: return "checkmark.circle"
-                  }
-              }
           }
 
           // MARK: - IP信息模型
@@ -164,39 +114,29 @@ jobs:
               let id = UUID()
               var ip: String
               var port: Int
-              var delay: Double
-              var tcpDelay: Double = -1
-              var tlsDelay: Double = -1
-              var httpDelay: Double = -1
-              var fullDelay: Double = -1
-              var location: String
-              var country: String
-              var city: String
-              var isp: String
-              var colo: String
-              var asn: String
-              var timezone: String
-              var ipVersion: String
-              var isAvailable: Bool
-
-              var bestDelay: Double {
-                  let delays = [fullDelay, httpDelay, tlsDelay, tcpDelay].filter { $0 > 0 }
-                  return delays.min() ?? -1
-              }
+              var delay: Double = -1
+              var location: String = ""
+              var country: String = ""
+              var city: String = ""
+              var isp: String = ""
+              var colo: String = ""
+              var asn: String = ""
+              var ipVersion: String = "IPv4"
+              var isAvailable: Bool = false
 
               var quality: String {
-                  let d = bestDelay
+                  let d = delay
                   switch d {
-                  case ..<30: return "🏆 极速"
-                  case ..<60: return "⭐ 优秀"
-                  case ..<100: return "👍 良好"
-                  case ..<200: return "📶 一般"
-                  default: return "🐢 较慢"
+                  case ..<30: return "🏆极速"
+                  case ..<60: return "⭐优秀"
+                  case ..<100: return "👍良好"
+                  case ..<200: return "📶一般"
+                  default: return "🐢较慢"
                   }
               }
 
               var qualityColor: Color {
-                  let d = bestDelay
+                  let d = delay
                   switch d {
                   case ..<30: return .purple
                   case ..<60: return .green
@@ -210,7 +150,6 @@ jobs:
           // MARK: - 网络管理器
           class NetworkManager: ObservableObject {
               @Published var ipList: [IPInfo] = []
-              @Published var filteredIPs: [IPInfo] = []
               @Published var isScanning = false
               @Published var progress = 0.0
               @Published var scanLog = ""
@@ -221,17 +160,9 @@ jobs:
               @Published var currentISP: String = "检测中..."
               @Published var currentIP: String = "检测中..."
               @Published var currentCountry: String = "检测中..."
-
-              @Published var currentPage = 0
-              @Published var pageSize = 50
-              @Published var searchText = ""
-              @Published var filterMinDelay: Double = 0
-              @Published var filterMaxDelay: Double = 9999
+              @Published var searchText: String = ""
 
               private var scanTask: Task<Void, Never>?
-              private let semaphore = DispatchSemaphore(value: 150)
-              private var locationCache: [String: LocationInfo] = [:]
-              private let cacheLock = NSLock()
 
               private let cfRanges = [
                   "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22",
@@ -241,67 +172,55 @@ jobs:
                   "104.24.0.0/14", "172.64.0.0/14", "131.0.72.0/22"
               ]
 
-              struct LocationInfo {
-                  var location: String
-                  var country: String
-                  var city: String
-                  var isp: String
-                  var asn: String
-                  var timezone: String
-              }
-
-              func detectISP() async {
-                  do {
-                      let url = URL(string: "http://ip-api.com/json/?fields=status,country,city,isp,as,query")!
-                      let (data, _) = try await URLSession.shared.data(from: url)
-                      if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                         json["status"] as? String == "success" {
-                          await MainActor.run {
+              // MARK: - 检测运营商
+              func detectISP() {
+                  guard let url = URL(string: "http://ip-api.com/json/?fields=isp,country,query") else { return }
+                  URLSession.shared.dataTask(with: url) { data, _, _ in
+                      guard let data = data else { return }
+                      if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                          DispatchQueue.main.async {
                               self.currentISP = json["isp"] as? String ?? "Unknown"
                               self.currentIP = json["query"] as? String ?? "Unknown"
                               self.currentCountry = json["country"] as? String ?? "Unknown"
                           }
                       }
-                  } catch {
-                      await MainActor.run {
-                          self.currentISP = "检测失败"
-                          self.currentIP = "未知"
-                          self.currentCountry = "未知"
-                      }
-                  }
+                  }.resume()
               }
 
+              // MARK: - 生成IP列表
               private func generateIPs() -> [String] {
                   var ips: [String] = []
-                  let targetCount = 10000
                   for cidr in cfRanges {
-                      guard let network = IPNetwork(cidr) else { continue }
-                      for ip in network.hosts {
-                          if ips.count >= targetCount { break }
+                      let parts = cidr.split(separator: "/")
+                      guard parts.count == 2, let prefix = Int(parts[1]) else { continue }
+                      let ipParts = parts[0].split(separator: ".")
+                      guard ipParts.count == 4 else { continue }
+                      let base = (UInt32(ipParts[0])! << 24) | (UInt32(ipParts[1])! << 16) | (UInt32(ipParts[2])! << 8) | UInt32(ipParts[3])!
+                      let count = 1 << (32 - prefix)
+                      for i in 1...min(count, 200) {
+                          let addr = base + UInt32(i)
+                          let ip = "\((addr >> 24) & 255).\((addr >> 16) & 255).\((addr >> 8) & 255).\(addr & 255)"
                           ips.append(ip)
                       }
-                      if ips.count >= targetCount { break }
                   }
                   return ips
               }
 
-              func startScan(customIPs: [String] = [], ports: [Int] = [443], delayType: DelayType = .full) {
+              // MARK: - 开始扫描
+              func startScan(customIPs: [String] = [], port: Int = 443) {
                   isScanning = true
                   ipList = []
-                  filteredIPs = []
                   scanLog = ""
                   availableCount = 0
-                  currentPage = 0
                   avgDelay = 0
                   minDelay = 0
 
                   let ips = customIPs.isEmpty ? generateIPs() : customIPs
-                  totalIPs = ips.count * ports.count
+                  totalIPs = ips.count
 
                   scanLog += "🌐 CF优选扫描器 v3.0\n"
-                  scanLog += "📡 待测IP: \(ips.count) 个 x \(ports.count) 端口\n"
-                  scanLog += "🔌 端口: \(ports.map { String($0) }.joined(separator: ", "))\n"
-                  scanLog += "📊 延迟类型: \(delayType.rawValue)\n"
+                  scanLog += "📡 待测IP: \(ips.count) 个\n"
+                  scanLog += "🔌 端口: \(port)\n"
                   scanLog += "📶 运营商: \(currentISP)\n"
                   scanLog += "📍 国家: \(currentCountry)\n"
                   scanLog += "⏳ 开始扫描...\n\n"
@@ -312,13 +231,18 @@ jobs:
                       var results: [IPInfo] = []
                       let lock = NSLock()
                       var processed = 0
-                      let total = ips.count * ports.count
+                      let total = ips.count
+
+                      let semaphore = DispatchSemaphore(value: 50)
 
                       for ip in ips {
                           if Task.isCancelled { break }
-                          for port in ports {
-                              if Task.isCancelled { break }
-                              let result = await self.testIPFull(ip, port: port, delayType: delayType)
+
+                          semaphore.wait()
+
+                          Task {
+                              let result = await self.testIP(ip, port: port)
+
                               lock.lock()
                               if let r = result, r.isAvailable {
                                   results.append(r)
@@ -326,27 +250,34 @@ jobs:
                               processed += 1
                               lock.unlock()
 
+                              semaphore.signal()
+
                               await MainActor.run {
                                   let available = results.filter { $0.isAvailable }
-                                  self.ipList = results.sorted { $0.bestDelay < $1.bestDelay }
-                                  self.filteredIPs = self.ipList
+                                  self.ipList = results.sorted { $0.delay < $1.delay }
                                   self.availableCount = available.count
                                   self.progress = Double(processed) / Double(total)
-                                  let delays = available.map { $0.bestDelay }.filter { $0 > 0 }
+
+                                  let delays = available.map { $0.delay }.filter { $0 > 0 }
                                   if !delays.isEmpty {
                                       self.avgDelay = delays.reduce(0, +) / Double(delays.count)
                                       self.minDelay = delays.min() ?? 0
                                   }
-                                  if processed % 10 == 0 {
+
+                                  if processed % 10 == 0 || processed == total {
                                       self.scanLog += "✅ 已扫描: \(processed)/\(total)  可用: \(self.availableCount)\n"
                                   }
                               }
                           }
                       }
 
+                      // 等待所有任务完成
+                      while processed < total {
+                          try? await Task.sleep(nanoseconds: 100_000_000)
+                      }
+
                       await MainActor.run {
-                          self.ipList = results.sorted { $0.bestDelay < $1.bestDelay }
-                          self.filteredIPs = self.ipList
+                          self.ipList = results.sorted { $0.delay < $1.delay }
                           self.isScanning = false
                           self.progress = 1.0
                           self.scanLog += "\n🎯 扫描完成！\n"
@@ -363,45 +294,32 @@ jobs:
                   scanLog += "\n⏹️ 已停止扫描\n"
               }
 
-              private func testIPFull(_ ip: String, port: Int, delayType: DelayType) async -> IPInfo? {
-                  var info = IPInfo(
-                      ip: ip,
-                      port: port,
-                      delay: -1,
-                      location: "",
-                      country: "",
-                      city: "",
-                      isp: "",
-                      colo: "",
-                      asn: "",
-                      timezone: "",
-                      ipVersion: ip.contains(":") ? "IPv6" : "IPv4",
-                      isAvailable: false
-                  )
+              // MARK: - 测试单个IP
+              private func testIP(_ ip: String, port: Int) async -> IPInfo? {
+                  var info = IPInfo(ip: ip, port: port)
 
-                  let result = await testHTTPDelay(ip, port: port)
-                  info.httpDelay = result.delay
-                  info.colo = result.colo ?? ""
+                  let result = await testHTTP(ip, port: port)
                   info.delay = result.delay
-
-                  info.isAvailable = info.delay > 0
+                  info.colo = result.colo ?? ""
+                  info.isAvailable = result.delay > 0
 
                   if info.isAvailable {
-                      let loc = await getLocationInfo(ip)
-                      info.location = loc.location
+                      let loc = await getLocation(ip)
                       info.country = loc.country
                       info.city = loc.city
                       info.isp = loc.isp
                       info.asn = loc.asn
-                      info.timezone = loc.timezone
+                      info.location = "\(loc.country) \(loc.city)".trimmingCharacters(in: .whitespaces)
                   }
 
                   return info.isAvailable ? info : nil
               }
 
-              private func testHTTPDelay(_ ip: String, port: Int) async -> (delay: Double, colo: String?) {
+              // MARK: - HTTP测试
+              private func testHTTP(_ ip: String, port: Int) async -> (delay: Double, colo: String?) {
                   let urlString = "https://\(ip):\(port)/cdn-cgi/trace"
                   guard let url = URL(string: urlString) else { return (-1, nil) }
+
                   let start = Date()
                   let config = URLSessionConfiguration.default
                   config.timeoutIntervalForRequest = 3
@@ -428,171 +346,67 @@ jobs:
                   return (-1, nil)
               }
 
-              private func getLocationInfo(_ ip: String) async -> LocationInfo {
-                  cacheLock.lock()
-                  if let cached = locationCache[ip] {
-                      cacheLock.unlock()
-                      return cached
-                  }
-                  cacheLock.unlock()
+              // MARK: - 获取位置信息
+              private func getLocation(_ ip: String) async -> (country: String, city: String, isp: String, asn: String) {
+                  let urlString = "http://ip-api.com/json/\(ip)?fields=status,country,city,isp,as"
+                  guard let url = URL(string: urlString) else { return ("", "", "", "") }
 
                   do {
-                      let url = URL(string: "http://ip-api.com/json/\(ip)?fields=status,country,city,isp,as,timezone")!
                       let (data, _) = try await URLSession.shared.data(from: url)
                       if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                          json["status"] as? String == "success" {
-                          let country = json["country"] as? String ?? ""
-                          let city = json["city"] as? String ?? ""
-                          let isp = json["isp"] as? String ?? ""
-                          let asn = json["as"] as? String ?? ""
-                          let timezone = json["timezone"] as? String ?? ""
-                          let location = "\(country) \(city)".trimmingCharacters(in: .whitespaces)
-
-                          let info = LocationInfo(
-                              location: location.isEmpty ? "Unknown" : location,
-                              country: country,
-                              city: city,
-                              isp: isp,
-                              asn: asn,
-                              timezone: timezone
+                          return (
+                              json["country"] as? String ?? "",
+                              json["city"] as? String ?? "",
+                              json["isp"] as? String ?? "",
+                              json["as"] as? String ?? ""
                           )
-                          cacheLock.lock()
-                          locationCache[ip] = info
-                          cacheLock.unlock()
-                          return info
                       }
-                  } catch {}
-                  return LocationInfo(location: "Unknown", country: "", city: "", isp: "", asn: "", timezone: "")
-              }
-
-              func applyFilters() {
-                  var filtered = ipList
-                  if !searchText.isEmpty {
-                      filtered = filtered.filter {
-                          $0.ip.contains(searchText) ||
-                          $0.country.localizedCaseInsensitiveContains(searchText) ||
-                          $0.colo.localizedCaseInsensitiveContains(searchText)
-                      }
+                  } catch {
+                      return ("", "", "", "")
                   }
-                  filtered = filtered.filter {
-                      let d = $0.bestDelay
-                      return (d >= filterMinDelay || d <= 0) && (d <= filterMaxDelay || d <= 0)
-                  }
-                  filteredIPs = filtered
-                  currentPage = 0
+                  return ("", "", "", "")
               }
 
-              func resetFilters() {
-                  searchText = ""
-                  filterMinDelay = 0
-                  filterMaxDelay = 9999
-                  filteredIPs = ipList
-                  currentPage = 0
-              }
-
-              func loadMore() { currentPage += 1 }
-
-              func getPageItems() -> [IPInfo] {
-                  let start = currentPage * pageSize
-                  let end = min(start + pageSize, filteredIPs.count)
-                  if start < filteredIPs.count {
-                      return Array(filteredIPs[start..<end])
-                  }
-                  return []
-              }
-
+              // MARK: - 复制功能
               func copyBestIPs(_ count: Int = 10) {
-                  let best = filteredIPs.filter { $0.isAvailable }.prefix(count)
+                  let best = ipList.filter { $0.isAvailable }.prefix(count)
                   let text = best.map { "\($0.ip):\($0.port)" }.joined(separator: "\n")
                   UIPasteboard.general.string = text
               }
 
               func copyWithDetails() {
-                  let best = filteredIPs.filter { $0.isAvailable }.prefix(30)
+                  let best = ipList.filter { $0.isAvailable }.prefix(30)
                   var text = "# CloudFlare 优选IP列表\n"
                   text += "# 运营商: \(currentISP)\n"
                   text += "# 国家: \(currentCountry)\n\n"
                   for ip in best {
-                      text += "\(ip.ip):\(ip.port)  [\(String(format: "%.0f", ip.bestDelay))ms] \(ip.quality) \(ip.colo) \(ip.country)\n"
+                      text += "\(ip.ip):\(ip.port)  [\(String(format: "%.0f", ip.delay))ms] \(ip.quality) \(ip.colo) \(ip.country)\n"
                   }
                   UIPasteboard.general.string = text
               }
 
               func copyAll() {
-                  let text = filteredIPs.filter { $0.isAvailable }.map { "\($0.ip):\($0.port)" }.joined(separator: "\n")
+                  let text = ipList.filter { $0.isAvailable }.map { "\($0.ip):\($0.port)" }.joined(separator: "\n")
                   UIPasteboard.general.string = text
               }
 
               func copyCSV() {
-                  var csv = "IP,端口,延迟(ms),质量,国家,城市,运营商,数据中心,ASN,时区,IP版本\n"
-                  for ip in filteredIPs.filter({ $0.isAvailable }) {
-                      csv += "\(ip.ip),\(ip.port),\(String(format: "%.0f", ip.bestDelay)),\(ip.quality),\(ip.country),\(ip.city),\(ip.isp),\(ip.colo),\(ip.asn),\(ip.timezone),\(ip.ipVersion)\n"
+                  var csv = "IP,端口,延迟(ms),质量,国家,城市,运营商,数据中心,ASN\n"
+                  for ip in ipList.filter({ $0.isAvailable }) {
+                      csv += "\(ip.ip),\(ip.port),\(String(format: "%.0f", ip.delay)),\(ip.quality),\(ip.country),\(ip.city),\(ip.isp),\(ip.colo),\(ip.asn)\n"
                   }
                   UIPasteboard.general.string = csv
-              }
-          }
-
-          // MARK: - IPNetwork
-          class IPNetwork {
-              let network: String
-              let prefix: Int
-
-              init?(_ cidr: String) {
-                  let parts = cidr.split(separator: "/")
-                  guard parts.count == 2, let prefix = Int(parts[1]) else { return nil }
-                  self.network = String(parts[0])
-                  self.prefix = prefix
-              }
-
-              var hosts: [String] {
-                  guard let ipv4 = IPv4Address(network) else { return [] }
-                  let start = ipv4.rawValue
-                  let hostBits = 32 - prefix
-                  let count = Int(pow(2.0, Double(hostBits))) - 2
-                  var result: [String] = []
-                  for i in 1...min(count, 200) {
-                      let addr = start + UInt32(i)
-                      if let ip = IPv4Address(rawValue: addr) {
-                          result.append(ip.description)
-                      }
-                  }
-                  return result
-              }
-          }
-
-          struct IPv4Address {
-              let rawValue: UInt32
-
-              init?(_ string: String) {
-                  let parts = string.split(separator: ".")
-                  guard parts.count == 4 else { return nil }
-                  var value: UInt32 = 0
-                  for part in parts {
-                      guard let num = UInt32(part), num < 256 else { return nil }
-                      value = (value << 8) + num
-                  }
-                  self.rawValue = value
-              }
-
-              var description: String {
-                  return [
-                      (rawValue >> 24) & 0xFF,
-                      (rawValue >> 16) & 0xFF,
-                      (rawValue >> 8) & 0xFF,
-                      rawValue & 0xFF
-                  ].map { String($0) }.joined(separator: ".")
               }
           }
 
           // MARK: - 主界面
           struct ContentView: View {
               @StateObject private var networkManager = NetworkManager()
-              @State private var selectedPorts: Set<Int> = [443]
-              @State private var selectedDelayType: DelayType = .full
+              @State private var selectedPort = 443
               @State private var customIPInput = ""
               @State private var showingAlert = false
               @State private var alertMessage = ""
-              @State private var showFilters = false
 
               let ports = [443, 2053, 2083, 2087, 2096, 8443]
 
@@ -656,45 +470,12 @@ jobs:
                           // 控制区
                           VStack(spacing: 6) {
                               HStack(spacing: 6) {
-                                  Menu {
+                                  Picker("端口", selection: $selectedPort) {
                                       ForEach(ports, id: \.self) { port in
-                                          Button {
-                                              if selectedPorts.contains(port) {
-                                                  selectedPorts.remove(port)
-                                              } else {
-                                                  selectedPorts.insert(port)
-                                              }
-                                          } label: {
-                                              HStack {
-                                                  Text("\(port)")
-                                                  if selectedPorts.contains(port) {
-                                                      Image(systemName: "checkmark")
-                                                  }
-                                              }
-                                          }
-                                      }
-                                  } label: {
-                                      HStack {
-                                          Text("端口")
-                                          Text(selectedPorts.sorted().map { String($0) }.joined(separator: ","))
-                                              .font(.caption2)
-                                              .foregroundColor(.blue)
-                                      }
-                                      .font(.caption)
-                                      .padding(.horizontal, 8)
-                                      .padding(.vertical, 4)
-                                      .background(Color(.systemGray6))
-                                      .cornerRadius(4)
-                                  }
-                                  .disabled(networkManager.isScanning)
-
-                                  Picker("", selection: $selectedDelayType) {
-                                      ForEach(DelayType.allCases, id: \.self) { type in
-                                          Text(type.rawValue).tag(type)
+                                          Text("\(port)").tag(port)
                                       }
                                   }
                                   .pickerStyle(MenuPickerStyle())
-                                  .labelsHidden()
                                   .frame(width: 80)
                                   .disabled(networkManager.isScanning)
 
@@ -707,15 +488,38 @@ jobs:
                                   } else {
                                       Button("开始扫描") {
                                           let customIPs = customIPInput.split(separator: "\n").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-                                          networkManager.startScan(
-                                              customIPs: customIPs,
-                                              ports: selectedPorts.sorted(),
-                                              delayType: selectedDelayType
-                                          )
+                                          networkManager.startScan(customIPs: customIPs, port: selectedPort)
                                       }
                                       .buttonStyle(.borderedProminent)
                                       .tint(.blue)
                                   }
+
+                                  Menu {
+                                      Button("复制前10个") {
+                                          networkManager.copyBestIPs()
+                                          alertMessage = "✅ 已复制"
+                                          showingAlert = true
+                                      }
+                                      Button("复制详细信息") {
+                                          networkManager.copyWithDetails()
+                                          alertMessage = "✅ 已复制"
+                                          showingAlert = true
+                                      }
+                                      Button("复制全部") {
+                                          networkManager.copyAll()
+                                          alertMessage = "✅ 已复制全部IP"
+                                          showingAlert = true
+                                      }
+                                      Button("复制CSV") {
+                                          networkManager.copyCSV()
+                                          alertMessage = "✅ CSV已复制"
+                                          showingAlert = true
+                                      }
+                                  } label: {
+                                      Image(systemName: "doc.on.doc")
+                                          .font(.title2)
+                                  }
+                                  .disabled(networkManager.isScanning)
                               }
 
                               // 自定义IP
@@ -761,15 +565,13 @@ jobs:
                               TextField("搜索IP/国家/数据中心...", text: $networkManager.searchText)
                                   .textFieldStyle(PlainTextFieldStyle())
                                   .font(.caption)
-                                  .onSubmit { networkManager.applyFilters() }
-                              Button { showFilters.toggle() } label: {
-                                  Image(systemName: "slider.horizontal.3")
-                                      .font(.caption)
-                              }
                               if !networkManager.searchText.isEmpty {
-                                  Button("清除") { networkManager.resetFilters() }
-                                      .font(.caption)
-                                      .foregroundColor(.red)
+                                  Button("清除") {
+                                      networkManager.searchText = ""
+                                      networkManager.objectWillChange.send()
+                                  }
+                                  .font(.caption)
+                                  .foregroundColor(.red)
                               }
                           }
                           .padding(.horizontal, 10)
@@ -780,67 +582,42 @@ jobs:
                           .padding(.vertical, 4)
 
                           // 结果列表
-                          List {
-                              ForEach(Array(networkManager.getPageItems().enumerated()), id: \.element.id) { index, ip in
-                                  VStack(alignment: .leading, spacing: 2) {
-                                      HStack {
-                                          Text("#\(index + 1 + networkManager.currentPage * networkManager.pageSize)")
-                                              .font(.caption2)
-                                              .foregroundColor(.secondary)
-                                              .frame(width: 28)
-                                          Text(ip.ip)
-                                              .font(.system(.subheadline, design: .monospaced))
-                                              .fontWeight(.medium)
-                                          Text(":\(ip.port)")
-                                              .font(.caption)
-                                              .foregroundColor(.secondary)
-                                          Spacer()
-                                          Text(ip.quality)
-                                              .font(.caption2)
-                                              .foregroundColor(ip.qualityColor)
-                                      }
-                                      HStack(spacing: 6) {
-                                          Text("📍 \(ip.country)")
-                                              .font(.caption2)
-                                              .foregroundColor(.secondary)
-                                          if !ip.colo.isEmpty {
-                                              Text("🏢 \(ip.colo)")
-                                                  .font(.caption2)
-                                                  .foregroundColor(.blue)
-                                          }
-                                          if !ip.isp.isEmpty {
-                                              Text("📶 \(ip.isp)")
-                                                  .font(.caption2)
-                                                  .foregroundColor(.secondary)
-                                          }
-                                          Spacer()
-                                          Text(ip.ipVersion)
-                                              .font(.caption2)
-                                              .foregroundColor(.secondary)
-                                              .padding(.horizontal, 4)
-                                              .background(Color(.systemGray6))
-                                              .cornerRadius(2)
-                                          Text("\(String(format: "%.0f", ip.bestDelay))ms")
-                                              .font(.caption)
-                                              .fontWeight(.bold)
-                                              .foregroundColor(ip.qualityColor)
-                                      }
-                                  }
-                                  .padding(.vertical, 2)
-                              }
-
-                              if networkManager.getPageItems().count < networkManager.filteredIPs.count {
+                          List(networkManager.ipList.filter { $0.isAvailable }) { ip in
+                              VStack(alignment: .leading, spacing: 2) {
                                   HStack {
+                                      Text(ip.ip)
+                                          .font(.system(.subheadline, design: .monospaced))
+                                          .fontWeight(.medium)
+                                      Text(":\(ip.port)")
+                                          .font(.caption)
+                                          .foregroundColor(.secondary)
                                       Spacer()
-                                      Button("加载更多 (\(networkManager.getPageItems().count)/\(networkManager.filteredIPs.count))") {
-                                          networkManager.loadMore()
-                                      }
-                                      .font(.caption)
-                                      .foregroundColor(.blue)
-                                      Spacer()
+                                      Text(ip.quality)
+                                          .font(.caption2)
+                                          .foregroundColor(ip.qualityColor)
                                   }
-                                  .padding(.vertical, 4)
+                                  HStack(spacing: 6) {
+                                      Text("📍 \(ip.country)")
+                                          .font(.caption2)
+                                          .foregroundColor(.secondary)
+                                      if !ip.colo.isEmpty {
+                                          Text("🏢 \(ip.colo)")
+                                              .font(.caption2)
+                                              .foregroundColor(.blue)
+                                      }
+                                      if !ip.isp.isEmpty {
+                                          Text("📶 \(ip.isp)")
+                                              .font(.caption2)
+                                              .foregroundColor(.secondary)
+                                      }
+                                      Spacer()
+                                      Text("\(String(format: "%.0f", ip.delay))ms")
+                                          .font(.caption)
+                                          .fontWeight(.bold)
+                                          .foregroundColor(ip.qualityColor)
+                                  }
                               }
+                              .padding(.vertical, 2)
                           }
                           .listStyle(.inset)
 
@@ -860,31 +637,12 @@ jobs:
                       .navigationBarTitleDisplayMode(.inline)
                       .toolbar {
                           ToolbarItem(placement: .navigationBarTrailing) {
-                              Menu {
-                                  Button("复制前10个") {
-                                      networkManager.copyBestIPs()
-                                      alertMessage = "✅ 已复制"
-                                      showingAlert = true
-                                  }
-                                  Button("复制详细信息") {
-                                      networkManager.copyWithDetails()
-                                      alertMessage = "✅ 已复制"
-                                      showingAlert = true
-                                  }
-                                  Button("复制全部") {
-                                      networkManager.copyAll()
-                                      alertMessage = "✅ 已复制"
-                                      showingAlert = true
-                                  }
-                                  Button("复制CSV") {
-                                      networkManager.copyCSV()
-                                      alertMessage = "✅ CSV已复制"
-                                      showingAlert = true
-                                  }
-                                  Button("清空日志") { networkManager.scanLog = "" }
+                              Button {
+                                  networkManager.scanLog = ""
                               } label: {
-                                  Image(systemName: "ellipsis.circle")
+                                  Image(systemName: "trash")
                               }
+                              .disabled(networkManager.scanLog.isEmpty)
                           }
                       }
                       .alert("提示", isPresented: $showingAlert) {
@@ -893,14 +651,14 @@ jobs:
                           Text(alertMessage)
                       }
                       .onAppear {
-                          Task { await networkManager.detectISP() }
+                          networkManager.detectISP()
                       }
                   }
               }
           }
           EOF
 
-          # ========== 5. Assets ==========
+          # ========== Assets ==========
           cat > CloudFlareScan/Assets.xcassets/Contents.json << 'EOF'
           {"info":{"author":"xcode","version":1}}
           EOF
@@ -911,7 +669,7 @@ jobs:
           {"colors":[{"idiom":"universal"}],"info":{"author":"xcode","version":1}}
           EOF
 
-          # ========== 6. Xcode Project ==========
+          # ========== Xcode Project ==========
           cat > CloudFlareScan.xcodeproj/project.pbxproj << 'EOF'
           // !$*UTF8*$!
           {
@@ -919,31 +677,55 @@ jobs:
               classes = {};
               objectVersion = 56;
               objects = {
-                  B800000000000001 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B800000000000002 /* AppDelegate.swift */; };
-                  B800000000000003 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B800000000000003A /* SceneDelegate.swift */; };
-                  B800000000000004 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B800000000000005 /* ContentView.swift */; };
-                  B800000000000006 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B800000000000007 /* Assets.xcassets */; };
-                  B800000000000002 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
-                  B800000000000003A /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
-                  B800000000000005 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-                  B800000000000007 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-                  B800000000000008 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-                  B800000000000009 /* CloudFlareScan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CloudFlareScan.app; sourceTree = BUILT_PRODUCTS_DIR; };
-                  B80000000000000A = {isa = PBXGroup; children = (B80000000000000B, B80000000000000C,); sourceTree = "<group>"; };
-                  B80000000000000B = {isa = PBXGroup; children = (B800000000000002, B800000000000003A, B800000000000005, B800000000000007, B800000000000008,); path = CloudFlareScan; sourceTree = "<group>"; };
-                  B80000000000000C = {isa = PBXGroup; children = (B800000000000009,); name = Products; sourceTree = "<group>"; };
-                  B80000000000000D = {isa = PBXNativeTarget; buildConfigurationList = B80000000000000E; buildPhases = (B80000000000000F, B800000000000010,); buildRules = (); dependencies = (); name = CloudFlareScan; productName = CloudFlareScan; productReference = B800000000000009; productType = "com.apple.product-type.application"; };
-                  B800000000000011 = {isa = PBXProject; attributes = {LastSwiftUpdateCheck = 1500; LastUpgradeCheck = 1500; TargetAttributes = {B80000000000000D = {CreatedOnToolsVersion = 15.0;};};}; buildConfigurationList = B800000000000012; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base,); mainGroup = B80000000000000A; productRefGroup = B80000000000000C; projectDirPath = ""; projectRoot = ""; targets = (B80000000000000D,); };
-                  B800000000000010 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (B800000000000006,); runOnlyForDeploymentPostprocessing = 0; };
-                  B80000000000000F = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (B800000000000001, B800000000000003, B800000000000004,); runOnlyForDeploymentPostprocessing = 0; };
-                  B800000000000013 = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES; CLANG_ANALYZER_NONNULL = YES; CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE; CLANG_CXX_LANGUAGE_STANDARD = "gnu++20"; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; CLANG_ENABLE_OBJC_WEAK = YES; CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES; CLANG_WARN_BOOL_CONVERSION = YES; CLANG_WARN_COMMA = YES; CLANG_WARN_CONSTANT_CONVERSION = YES; CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES; CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR; CLANG_WARN_DOCUMENTATION_COMMENTS = YES; CLANG_WARN_EMPTY_BODY = YES; CLANG_WARN_ENUM_CONVERSION = YES; CLANG_WARN_INFINITE_RECURSION = YES; CLANG_WARN_INT_CONVERSION = YES; CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES; CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES; CLANG_WARN_OBJC_LITERAL_CONVERSION = YES; CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR; CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES; CLANG_WARN_RANGE_LOOP_ANALYSIS = YES; CLANG_WARN_STRICT_PROTOTYPES = YES; CLANG_WARN_SUSPICIOUS_MOVE = YES; CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE; CLANG_WARN_UNREACHABLE_CODE = YES; CLANG_WARN__DUPLICATE_METHOD_MATCH = YES; COPY_PHASE_STRIP = NO; DEBUG_INFORMATION_FORMAT = dwarf; DEVELOPMENT_TEAM = ""; ENABLE_STRICT_OBJC_MSGSEND = YES; ENABLE_TESTABILITY = YES; GCC_C_LANGUAGE_STANDARD = gnu17; GCC_DYNAMIC_NO_PIC = NO; GCC_NO_COMMON_BLOCKS = YES; GCC_OPTIMIZATION_LEVEL = 0; GCC_PREPROCESSOR_DEFINITIONS = ("DEBUG=1", "$(inherited)",); GCC_WARN_64_TO_32_BIT_CONVERSION = YES; GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR; GCC_WARN_UNDECLARED_SELECTOR = YES; GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE; GCC_WARN_UNUSED_FUNCTION = YES; GCC_WARN_UNUSED_VARIABLE = YES; IPHONEOS_DEPLOYMENT_TARGET = 15.0; MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE; MTL_FAST_MATH = YES; ONLY_ACTIVE_ARCH = YES; SDKROOT = iphoneos; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)"; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
-                  B800000000000014 = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES; CLANG_ANALYZER_NONNULL = YES; CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE; CLANG_CXX_LANGUAGE_STANDARD = "gnu++20"; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; CLANG_ENABLE_OBJC_WEAK = YES; CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES; CLANG_WARN_BOOL_CONVERSION = YES; CLANG_WARN_COMMA = YES; CLANG_WARN_CONSTANT_CONVERSION = YES; CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES; CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR; CLANG_WARN_DOCUMENTATION_COMMENTS = YES; CLANG_WARN_EMPTY_BODY = YES; CLANG_WARN_ENUM_CONVERSION = YES; CLANG_WARN_INFINITE_RECURSION = YES; CLANG_WARN_INT_CONVERSION = YES; CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES; CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES; CLANG_WARN_OBJC_LITERAL_CONVERSION = YES; CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR; CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES; CLANG_WARN_RANGE_LOOP_ANALYSIS = YES; CLANG_WARN_STRICT_PROTOTYPES = YES; CLANG_WARN_SUSPICIOUS_MOVE = YES; CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE; CLANG_WARN_UNREACHABLE_CODE = YES; CLANG_WARN__DUPLICATE_METHOD_MATCH = YES; COPY_PHASE_STRIP = NO; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; DEVELOPMENT_TEAM = ""; ENABLE_NS_ASSERTIONS = NO; ENABLE_STRICT_OBJC_MSGSEND = YES; GCC_C_LANGUAGE_STANDARD = gnu17; GCC_NO_COMMON_BLOCKS = YES; GCC_WARN_64_TO_32_BIT_CONVERSION = YES; GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR; GCC_WARN_UNDECLARED_SELECTOR = YES; GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE; GCC_WARN_UNUSED_FUNCTION = YES; GCC_WARN_UNUSED_VARIABLE = YES; IPHONEOS_DEPLOYMENT_TARGET = 15.0; MTL_ENABLE_DEBUG_INFO = NO; MTL_FAST_MATH = YES; SDKROOT = iphoneos; SWIFT_COMPILATION_MODE = wholemodule; TARGETED_DEVICE_FAMILY = "1,2"; VALIDATE_PRODUCT = YES; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
-                  B800000000000015 = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor; CODE_SIGN_IDENTITY = ""; CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; INFOPLIST_FILE = CloudFlareScan/Info.plist; INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"; INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks",); MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
-                  B800000000000016 = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor; CODE_SIGN_IDENTITY = ""; CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; INFOPLIST_FILE = CloudFlareScan/Info.plist; INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"; INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks",); MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
-                  B80000000000000E = {isa = XCConfigurationList; buildConfigurations = (B800000000000015, B800000000000016,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-                  B800000000000012 = {isa = XCConfigurationList; buildConfigurations = (B800000000000013, B800000000000014,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+                  /* Begin PBXBuildFile section */
+                  A10000000001 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000002 /* AppDelegate.swift */; };
+                  A10000000003 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000004 /* ContentView.swift */; };
+                  A10000000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000006 /* Assets.xcassets */; };
+                  /* End PBXBuildFile section */
+
+                  /* Begin PBXFileReference section */
+                  A10000000002 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+                  A10000000004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+                  A10000000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+                  A10000000007 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+                  A10000000008 /* CloudFlareScan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CloudFlareScan.app; sourceTree = BUILT_PRODUCTS_DIR; };
+                  /* End PBXFileReference section */
+
+                  /* Begin PBXGroup section */
+                  A10000000009 = {isa = PBXGroup; children = (A10000000010, A10000000011,); sourceTree = "<group>"; };
+                  A10000000010 /* CloudFlareScan */ = {isa = PBXGroup; children = (A10000000002, A10000000004, A10000000006, A10000000007,); path = CloudFlareScan; sourceTree = "<group>"; };
+                  A10000000011 /* Products */ = {isa = PBXGroup; children = (A10000000008,); name = Products; sourceTree = "<group>"; };
+                  /* End PBXGroup section */
+
+                  /* Begin PBXNativeTarget section */
+                  A10000000012 /* CloudFlareScan */ = {isa = PBXNativeTarget; buildConfigurationList = A10000000013; buildPhases = (A10000000014, A10000000015,); buildRules = (); dependencies = (); name = CloudFlareScan; productName = CloudFlareScan; productReference = A10000000008; productType = "com.apple.product-type.application"; };
+                  /* End PBXNativeTarget section */
+
+                  /* Begin PBXProject section */
+                  A10000000016 /* Project object */ = {isa = PBXProject; attributes = {LastSwiftUpdateCheck = 1500; LastUpgradeCheck = 1500; TargetAttributes = {A10000000012 = {CreatedOnToolsVersion = 15.0;};};}; buildConfigurationList = A10000000017; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base,); mainGroup = A10000000009; productRefGroup = A10000000011; projectDirPath = ""; projectRoot = ""; targets = (A10000000012,); };
+                  /* End PBXProject section */
+
+                  /* Begin PBXResourcesBuildPhase section */
+                  A10000000015 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000005,); runOnlyForDeploymentPostprocessing = 0; };
+                  /* End PBXResourcesBuildPhase section */
+
+                  /* Begin PBXSourcesBuildPhase section */
+                  A10000000014 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000001, A10000000003,); runOnlyForDeploymentPostprocessing = 0; };
+                  /* End PBXSourcesBuildPhase section */
+
+                  /* Begin XCBuildConfiguration section */
+                  A10000000018 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
+                  A10000000019 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
+                  A10000000020 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor; CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; INFOPLIST_FILE = CloudFlareScan/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; SWIFT_VERSION = 5.0; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
+                  A10000000021 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor; CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; INFOPLIST_FILE = CloudFlareScan/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; SWIFT_VERSION = 5.0; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
+                  /* End XCBuildConfiguration section */
+
+                  /* Begin XCConfigurationList section */
+                  A10000000013 = {isa = XCConfigurationList; buildConfigurations = (A10000000020, A10000000021,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+                  A10000000017 = {isa = XCConfigurationList; buildConfigurations = (A10000000018, A10000000019,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+                  /* End XCConfigurationList section */
               };
-              rootObject = B800000000000011;
+              rootObject = A10000000016;
           }
           EOF
 
@@ -965,12 +747,12 @@ jobs:
         run: |
           APP_PATH=$(find build -name "*.app" -type d | head -1)
           echo "找到 APP: $APP_PATH"
-          
+
           if [ -z "$APP_PATH" ]; then
             echo "❌ 未找到 .app 文件"
             exit 1
           fi
-          
+
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
           zip -r CloudFlareScan.ipa Payload
