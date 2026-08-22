@@ -20,32 +20,56 @@ jobs:
           sudo xcode-select -switch /Applications/Xcode.app/Contents/Developer
           xcodebuild -version
 
-      - name: Create Project
+      - name: Create Swift Package
         run: |
-          mkdir -p CloudFlareScan
-          mkdir -p CloudFlareScan.xcodeproj
+          mkdir -p CloudFlareScanApp/Sources/CloudFlareScanApp
+          cd CloudFlareScanApp
+
+          # Package.swift
+          cat > Package.swift << 'EOF'
+          // swift-tools-version:5.9
+          import PackageDescription
+
+          let package = Package(
+              name: "CloudFlareScanApp",
+              platforms: [
+                  .iOS(.v15)
+              ],
+              products: [
+                  .library(
+                      name: "CloudFlareScanApp",
+                      targets: ["CloudFlareScanApp"]
+                  )
+              ],
+              targets: [
+                  .target(
+                      name: "CloudFlareScanApp",
+                      path: "Sources/CloudFlareScanApp"
+                  )
+              ]
+          )
+          EOF
+
+          cd ..
 
       - name: Create Source Files
         run: |
-          cat > CloudFlareScan/AppDelegate.swift << 'EOF'
-          import UIKit
+          cd CloudFlareScanApp/Sources/CloudFlareScanApp
+
+          cat > App.swift << 'EOF'
           import SwiftUI
 
           @main
-          class AppDelegate: UIResponder, UIApplicationDelegate {
-              var window: UIWindow?
-
-              func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-                  let window = UIWindow(frame: UIScreen.main.bounds)
-                  window.rootViewController = UIHostingController(rootView: ContentView())
-                  self.window = window
-                  window.makeKeyAndVisible()
-                  return true
+          struct CloudFlareScanApp: App {
+              var body: some Scene {
+                  WindowGroup {
+                      ContentView()
+                  }
               }
           }
           EOF
 
-          cat > CloudFlareScan/ContentView.swift << 'EOF'
+          cat > ContentView.swift << 'EOF'
           import SwiftUI
 
           struct IPItem: Identifiable {
@@ -356,55 +380,23 @@ jobs:
           }
           EOF
 
-      - name: Create Xcode Project
+      - name: Build with xcodebuild
         run: |
-          cat > CloudFlareScan.xcodeproj/project.pbxproj << 'EOF'
-          // !$*UTF8*$!
-          {
-              archiveVersion = 1;
-              classes = {};
-              objectVersion = 56;
-              objects = {
-                  K100000001 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = K100000002 /* AppDelegate.swift */; };
-                  K100000003 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = K100000004 /* ContentView.swift */; };
-                  K100000002 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
-                  K100000004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-                  K100000005 /* CloudFlareScan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CloudFlareScan.app; sourceTree = BUILT_PRODUCTS_DIR; };
-                  K100000006 = {isa = PBXGroup; children = (K100000007, K100000008,); sourceTree = "<group>"; };
-                  K100000007 /* CloudFlareScan */ = {isa = PBXGroup; children = (K100000002, K100000004,); path = CloudFlareScan; sourceTree = "<group>"; };
-                  K100000008 /* Products */ = {isa = PBXGroup; children = (K100000005,); name = Products; sourceTree = "<group>"; };
-                  K100000009 /* CloudFlareScan */ = {isa = PBXNativeTarget; buildConfigurationList = K100000010; buildPhases = (K100000011, K100000012,); buildRules = (); dependencies = (); name = CloudFlareScan; productName = CloudFlareScan; productReference = K100000005; productType = "com.apple.product-type.application"; };
-                  K100000013 /* Project object */ = {isa = PBXProject; attributes = {LastSwiftUpdateCheck = 1500; LastUpgradeCheck = 1500; TargetAttributes = {K100000009 = {CreatedOnToolsVersion = 15.0;};};}; buildConfigurationList = K100000014; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base,); mainGroup = K100000006; productRefGroup = K100000008; projectDirPath = ""; projectRoot = ""; targets = (K100000009,); };
-                  K100000012 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-                  K100000011 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (K100000001, K100000003,); runOnlyForDeploymentPostprocessing = 0; };
-                  K100000015 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
-                  K100000016 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
-                  K100000017 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = YES; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; SWIFT_VERSION = 5.0; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
-                  K100000018 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = YES; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; SWIFT_VERSION = 5.0; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
-                  K100000010 = {isa = XCConfigurationList; buildConfigurations = (K100000017, K100000018,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-                  K100000014 = {isa = XCConfigurationList; buildConfigurations = (K100000015, K100000016,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-              };
-              rootObject = K100000013;
-          }
-          EOF
-
-      - name: Build App
-        run: |
-          xcodebuild -project CloudFlareScan.xcodeproj \
-            -scheme CloudFlareScan \
+          cd CloudFlareScanApp
+          xcodebuild -scheme CloudFlareScanApp \
+            -destination 'generic/platform=iOS' \
             -configuration Release \
-            -derivedDataPath build \
-            -sdk iphoneos \
+            build \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            ONLY_ACTIVE_ARCH=NO
+            CODE_SIGNING_ALLOWED=NO
 
-      - name: Package IPA
+      - name: Find and Package IPA
         run: |
-          APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" -type d 2>/dev/null | head -1)
+          cd CloudFlareScanApp
+          APP_PATH=$(find build -name "*.app" -type d 2>/dev/null | head -1)
           if [ -z "$APP_PATH" ]; then
-            APP_PATH=$(find build -name "*.app" -type d 2>/dev/null | head -1)
+            APP_PATH=$(find . -name "*.app" -type d 2>/dev/null | head -1)
           fi
 
           if [ -z "$APP_PATH" ]; then
@@ -416,9 +408,9 @@ jobs:
           echo "✅ 找到: $APP_PATH"
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
-          zip -r CloudFlareScan.ipa Payload
-          cp CloudFlareScan.ipa CloudFlareScan.tipa
-          ls -la *.ipa *.tipa
+          zip -r ../CloudFlareScan.ipa Payload
+          cp ../CloudFlareScan.ipa ../CloudFlareScan.tipa
+          cd ..
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
