@@ -1,33 +1,25 @@
-```yaml
 name: Build IPSelector
-
 on:
   workflow_dispatch:
   schedule:
     - cron: '0 4 * * *'
-
 permissions:
   contents: write
-
 jobs:
   build:
     runs-on: macos-14
     timeout-minutes: 30
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Install deps
         run: |
           brew install zsign
           pip3 install pyyaml maxminddb-geolite2 --break-system-packages
-
       - name: Download GeoIP
         run: |
           mkdir -p geoip
           curl -L "https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-City.mmdb" -o geoip/GeoLite2-City.mmdb
           curl -L "https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-ASN.mmdb" -o geoip/GeoLite2-ASN.mmdb
-
       - name: Create main.py
         run: |
           cat > main.py << 'PYEOF'
@@ -38,10 +30,10 @@ jobs:
           from dataclasses import dataclass
           import yaml
           import maxminddb
-
+          
           CITY_DB = Path("geoip/GeoLite2-City.mmdb")
           ASN_DB = Path("geoip/GeoLite2-ASN.mmdb")
-
+          
           @dataclass
           class Node:
               ip: str
@@ -54,7 +46,7 @@ jobs:
               tls_ms: int
               http_ms: int
               score: float
-
+          
           def geo(ip):
               c = ""
               r = ""
@@ -74,7 +66,7 @@ jobs:
               except Exception as e:
                   print(f"Geo error: {e}")
               return c, r, isp
-
+          
           async def tcp_ping(ip, port):
               try:
                   s = time.perf_counter()
@@ -84,7 +76,7 @@ jobs:
                   return int((time.perf_counter() - s) * 1000)
               except Exception:
                   return 9999
-
+          
           async def test_ip(ip, port):
               c, r, isp = geo(ip)
               tcp = await tcp_ping(ip, port)
@@ -93,18 +85,18 @@ jobs:
               score = tcp + tls + http
               name = f"{c}-{r}-{isp}" if c else ip
               return Node(ip=ip, port=port, name=name, country=c, region=r, isp=isp, tcp_ms=tcp, tls_ms=tls, http_ms=http, score=score)
-
+          
           async def main():
               targets = [("104.16.0.1", 443), ("1.0.0.1", 443), ("8.8.8.8", 443)]
               sem = asyncio.Semaphore(50)
-
+              
               async def run(t):
                   async with sem:
                       return await test_ip(t[0], t[1])
-
+              
               results = await asyncio.gather(*[run(t) for t in targets])
               results.sort(key=lambda x: x.score)
-
+              
               proxies = []
               for i, r in enumerate(results):
                   proxies.append({
@@ -117,19 +109,17 @@ jobs:
                       "sni": r.ip,
                       "skip-cert-verify": True
                   })
-
+              
               with open("result.yaml", "w") as f:
                   yaml.dump({"proxies": proxies}, f, allow_unicode=True, default_flow_style=False)
-
+              
               print(f"Done: {len(proxies)} proxies")
-
+          
           asyncio.run(main())
           PYEOF
           chmod +x main.py
-
       - name: Run scan
         run: python3 main.py
-
       - name: Create iOS App
         run: |
           mkdir -p IPSelector/Sources
@@ -205,19 +195,16 @@ jobs:
               }
           }
           EOF
-
       - name: Package IPA
         run: |
           mkdir -p Payload
           echo "test" > Payload/test.txt
           zip -r IPSelector.ipa Payload/
-
       - name: Sign IPA
         run: |
           openssl req -newkey rsa:2048 -nodes -keyout key.pem -x509 -days 3650 -out cert.pem -subj "/CN=IPSelector" 2>/dev/null || true
           openssl pkcs12 -export -in cert.pem -inkey key.pem -out cert.p12 -passout pass: 2>/dev/null || true
           zsign -k key.pem -c cert.pem -p cert.p12 -P "" -b com.ipselector.tool -n IPSelector -o signed.ipa IPSelector.ipa 2>/dev/null || cp IPSelector.ipa signed.ipa
-
       - name: Upload
         uses: softprops/action-gh-release@v2
         with:
@@ -226,4 +213,3 @@ jobs:
           files: |
             signed.ipa
             result.yaml
-```
