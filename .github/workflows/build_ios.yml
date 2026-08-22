@@ -1,87 +1,152 @@
-name: Build iOS IPA for TrollStore
+```yaml
+name: IPSelector Auto Build
 
 on:
-  workflow_dispatch:
   push:
-    branches: [ main, master ]
-    paths-ignore:
-      - '**.md'
-      - 'LICENSE'
-      - '.gitignore'
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 * * *'
+
+permissions:
+  contents: write
+
+env:
+  BUNDLE_ID: com.ipselector.tool
 
 jobs:
-  build-ipa:
+  build:
     runs-on: macos-14
+    timeout-minutes: 30
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install macOS System Dependencies
+      - name: Install zsign & Python deps
         run: |
-          brew update
-          brew install autoconf automake libtool pkg-config cmake ldid
+          brew install zsign
+          python3 -m pip install --quiet maxminddb-geolite2 pyyaml
 
-      - name: Install Kivy-iOS and Build Tools
+      - name: Download GeoIP DB
         run: |
-          python -m pip install --upgrade pip
-          pip install "cython<3.0.0"
-          pip install kivy-ios
+          mkdir -p geoip
+          curl -L "https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-City.mmdb" -o geoip/GeoLite2-City.mmdb
+          curl -L "https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-ASN.mmdb" -o geoip/GeoLite2-ASN.mmdb
 
-      - name: Restore Kivy-iOS Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.kivy-ios
-            dist
-          key: ${{ runner.os }}-kivy-ios-v11-${{ hashFiles('**/main.py') }}
-          restore-keys: |
-            ${{ runner.os }}-kivy-ios-v11-
-
-      - name: Build Kivy-iOS Recipes
+      - name: Generate Swift App
         run: |
-          toolchain build python3 kivy openssl
+          mkdir -p IPSelector
+          cat > IPSelector/Info.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleIdentifier</key><string>${{ env.BUNDLE_ID }}</string>
+            <key>CFBundleName</key><string>IPSelector</string>
+            <key>CFBundleDisplayName</key><string>IP优选</string>
+            <key>CFBundleVersion</key><string>1</string>
+            <key>CFBundleShortVersionString</key><string>1.0</string>
+            <key>MinimumOSVersion</key><string>15.0</string>
+            <key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoads</key><true/></dict>
+          </dict>
+          </plist>
+          EOF
 
-      - name: Prepare Clean Source & Create Xcode Project
+          cat > IPSelector/IPSelectorApp.swift << 'EOF'
+          import SwiftUI
+          @main struct App: App { var body: some Scene { WindowGroup { ContentView() } } }
+          EOF
+
+          cat > IPSelector/ContentView.swift << 'EOF'
+          import SwiftUI
+          struct ContentView: View {
+              @State var nodes: [String] = []
+              @State var loading = false
+              var body: some View {
+                  List(nodes, id: \.self) { Text($0) }
+                      .task { await load() }
+              }
+              func load() async {
+                  loading = true
+                  defer { loading = false }
+                  guard let url = URL(string: "https://github.com/\(ProcessInfo.processInfo.environment["GITHUB_REPOSITORY"] ?? "user/repo")/releases/latest/download/result.yaml") else { return }
+                  do {
+                      let (data, _) = try await URLSession.shared.data(from: url)
+                      let text = String(data: data, encoding: .utf8) ?? ""
+                      nodes = text.components(separatedBy: "\n").filter { $0.contains("server:") || $0.contains("- ") }
+                  } catch { print(error) }
+              }
+          }
+          EOF
+
+      - name: Generate Scan Script
         run: |
-          # 独立导出 app_src，彻底切断 rsync 的死循环与打包超大垃圾文件
-          rm -rf app_src cloudflarescan-ios
-          mkdir -p app_src
-          cp main.py app_src/
+          cat > scan.py << 'PYEOF'
+          #!/usr/bin/env python3
+          import asyncio, socket, ssl, time, json, ipaddress
+          from pathlib import Path
+          from dataclasses import dataclass
+          import yaml
+          import maxminddb
+          CITY_DB = Path("geoip/GeoLite2-City.mmdb")
+          ASN_DB  = Path("geoip/GeoLite2-ASN.mmdb")
+          @dataclass
+          class R:
+              ip:str; port:int; c:str=""; r:str=""; isp:str=""
+              tcp:int=9999; tls:int=9999; score:float=9999; err:str=""
+          def geo(ip):
+              c=r=isp=""
+              try:
+                  if CITY_DB.exists():
+                      d=maxminddb.open_database(str(CITY_DB)); rec=d.get(ip)
+                      if rec:
+                          c=(rec.get("country",{}).get("names",{}).get("zh-CN") or rec.get("country",{}).get("iso_code",""))
+                          r=((rec.get("subdivisions",[{}])[0].get("names",{}).get("zh-CN") or ""))
+                  if ASN_DB.exists():
+                      d=maxminddb.open_database(str(ASN_DB)); rec=d.get(ip)
+                      if rec: isp=rec.get("autonomous_system_organization","")
+              except: pass
+              return c,r,isp
+          async def tcp(ip,port):
+              try:
+                  s=time.perf_counter(); _,w=await asyncio.wait_for(asyncio.open_connection(ip,port),timeout=3); w.close(); await w.wait_closed(); return int((time.perf_counter()-s)*100)
+              except: return None
+          async def main():
+              targets=[("104.16.0.1",43),("1.0.0.1",443)]
+              sem=asyncio.Semaphore(100); results=[]
+              async def run(t):
+                  async with sem:
+                      ip,port=t; c,r,isp=geo(ip)
+                      r=R(ip=ip,port=port,name=f"{c}-{r}-{isp}" if c else f"{ip}",c=c,rsp=r,isp=isp)
+                      t1=await tcp(ip,port)
+                      if t1: r.tcp=t1; r.score=t1
+                      return r
+              results=await asyncio.gather(*[run(t) for t in targets])
+              results.sort(key=lambda x:(x.err != "",x.score))
+              proxies=[]
+              for i,r in enumerate(results[:50]):
+                  if r.err: continue
+                  proxies.append({"name":f"{i+1:02d}-{r.name}","type":"trojan","server":r.ip,"port":r.port,"password":"","tls":True,"sni":r.ip})
+              with open("result.yaml","w") as f: yaml.dump({"proxies":proxies},f,allow_unicode=True,default_flow_style=False)
+              print(f"Done: {len(proxies)} proxies")
+          asyncio.run(main())
+          PYEOF
+          chmod +x scan.py
 
-          toolchain create "cloudflarescan" "$PWD/app_src"
+      - name: Run Scan
+        run: python3 scan.py
 
       - name: Build Xcode Project
         run: |
-          cd cloudflarescan-ios
-          xcodebuild -project cloudflarescan.xcodeproj \
-            -scheme cloudflarescan \
-            -configuration Release \
-            -sdk iphoneos \
-            SYMROOT="$PWD/build" \
-            IPHONEOS_DEPLOYMENT_TARGET=13.0 \
-            ENABLE_USER_SCRIPT_SANDBOXING=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            clean build
+          xcodebuild create-xcodeproj -project IPSelector.xcodeproj -scheme IPSelector -destination "generic/platform=iOS" CODE_SIGNING_ALLOWED=NO
+          xcodebuild build -project IPSelector.xcodeproj -scheme IPSelector -configuration Release -destination "generic/platform=iOS" CODE_SIGNING_ALLOWED=NO
 
-      - name: Package IPA for TrollStore
+      - name: Package IPA
         run: |
           mkdir -p Payload
-          cp -R cloudflarescan-ios/build/Release-iphoneos/*.app Payload/
-          APP_NAME=$(ls Payload/)
-          ldid -S "Payload/$APP_NAME/cloudflarescan" || ldid -S "Payload/$APP_NAME/${APP_NAME%.app}"
-          zip -r CloudflareScan-iOS-TrollStore.ipa Payload
+          cp -r build/Release-iphoneos/IPSelector.app Payload/
+          zip -r IPSelector.ipa Payload
 
-      - name: Upload IPA Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: CloudflareScan-iOS-TrollStore
-          path: CloudflareScan-iOS-TrollStore.ipa
-          retention-days: 7
+      - name: Sign IPA
+        run: |
+          openssl req -newkey rsa:2
