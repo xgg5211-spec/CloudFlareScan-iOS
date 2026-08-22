@@ -20,13 +20,14 @@ jobs:
           sudo xcode-select -switch /Applications/Xcode.app/Contents/Developer
           xcodebuild -version
 
-      - name: Create Native iOS App
+      - name: Create Project Directory
         run: |
-          # 创建项目结构
           mkdir -p CloudFlareScan
+          mkdir -p CloudFlareScan.xcodeproj
           mkdir -p CloudFlareScan/Assets.xcassets
 
-          # Info.plist
+      - name: Create Info.plist
+        run: |
           cat > CloudFlareScan/Info.plist << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -71,7 +72,6 @@ jobs:
 
       - name: Create Source Files
         run: |
-          # AppDelegate.h
           cat > CloudFlareScan/AppDelegate.h << 'EOF'
           #import <UIKit/UIKit.h>
 
@@ -80,7 +80,6 @@ jobs:
           @end
           EOF
 
-          # AppDelegate.m
           cat > CloudFlareScan/AppDelegate.m << 'EOF'
           #import "AppDelegate.h"
           #import "ViewController.h"
@@ -97,7 +96,6 @@ jobs:
           @end
           EOF
 
-          # ViewController.h
           cat > CloudFlareScan/ViewController.h << 'EOF'
           #import <UIKit/UIKit.h>
 
@@ -105,7 +103,6 @@ jobs:
           @end
           EOF
 
-          # ViewController.m
           cat > CloudFlareScan/ViewController.m << 'EOF'
           #import "ViewController.h"
 
@@ -141,7 +138,6 @@ jobs:
               self.results = [NSMutableArray array];
               self.queue = [[NSOperationQueue alloc] init];
               self.queue.maxConcurrentOperationCount = 100;
-
               [self setupUI];
               [self detectISP];
           }
@@ -173,7 +169,6 @@ jobs:
               CGFloat w = self.view.bounds.size.width - 24;
               CGFloat y = 12;
 
-              // 状态
               self.statusLabel = [[UILabel alloc] init];
               self.statusLabel.text = @"就绪";
               self.statusLabel.textColor = [UIColor grayColor];
@@ -201,7 +196,6 @@ jobs:
 
               y += 32;
 
-              // 输入框
               UIView *inputBg = [[UIView alloc] init];
               inputBg.backgroundColor = [UIColor colorWithRed:0.10 green:0.13 blue:0.22 alpha:1];
               inputBg.layer.cornerRadius = 8;
@@ -226,7 +220,6 @@ jobs:
 
               y += 128;
 
-              // 按钮
               UIView *btnBg = [[UIView alloc] init];
               btnBg.backgroundColor = [UIColor colorWithRed:0.10 green:0.13 blue:0.22 alpha:1];
               btnBg.layer.cornerRadius = 8;
@@ -252,7 +245,6 @@ jobs:
 
               y += 58;
 
-              // 列表
               UIView *tableBg = [[UIView alloc] init];
               tableBg.backgroundColor = [UIColor colorWithRed:0.10 green:0.13 blue:0.22 alpha:1];
               tableBg.layer.cornerRadius = 8;
@@ -277,7 +269,6 @@ jobs:
 
               y += 188;
 
-              // 输出
               UIView *outBg = [[UIView alloc] init];
               outBg.backgroundColor = [UIColor colorWithRed:0.10 green:0.13 blue:0.22 alpha:1];
               outBg.layer.cornerRadius = 8;
@@ -301,7 +292,6 @@ jobs:
               [outBg addSubview:outView];
 
               y += 128;
-
               content.frame = CGRectMake(0, 0, self.view.bounds.size.width, y + 20);
               scroll.contentSize = content.frame.size;
           }
@@ -507,7 +497,7 @@ jobs:
           @end
           EOF
 
-      - name: Create Xcode Project
+      - name: Create Xcode Project File
         run: |
           cat > CloudFlareScan.xcodeproj/project.pbxproj << 'EOF'
           // !$*UTF8*$!
@@ -516,31 +506,34 @@ jobs:
               classes = {};
               objectVersion = 56;
               objects = {
-                  M100000001 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = M100000002 /* AppDelegate.m */; };
-                  M100000003 /* ViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = M100000004 /* ViewController.m */; };
-                  M100000002 /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
-                  M100000003 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
-                  M100000004 /* ViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ViewController.m; sourceTree = "<group>"; };
-                  M100000005 /* ViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ViewController.h; sourceTree = "<group>"; };
-                  M100000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-                  M100000007 /* CloudFlareScan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CloudFlareScan.app; sourceTree = BUILT_PRODUCTS_DIR; };
-                  M100000008 = {isa = PBXGroup; children = (M100000009, M100000010,); sourceTree = "<group>"; };
-                  M100000009 /* CloudFlareScan */ = {isa = PBXGroup; children = (M100000003, M100000002, M100000005, M100000004, M100000006,); path = CloudFlareScan; sourceTree = "<group>"; };
-                  M100000010 /* Products */ = {isa = PBXGroup; children = (M100000007,); name = Products; sourceTree = "<group>"; };
-                  M100000011 /* CloudFlareScan */ = {isa = PBXNativeTarget; buildConfigurationList = M100000012; buildPhases = (M100000013, M100000014,); buildRules = (); dependencies = (); name = CloudFlareScan; productName = CloudFlareScan; productReference = M100000007; productType = "com.apple.product-type.application"; };
-                  M100000015 /* Project object */ = {isa = PBXProject; attributes = {LastSwiftUpdateCheck = 1500; LastUpgradeCheck = 1500; TargetAttributes = {M100000011 = {CreatedOnToolsVersion = 15.0;};};}; buildConfigurationList = M100000016; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base,); mainGroup = M100000008; productRefGroup = M100000010; projectDirPath = ""; projectRoot = ""; targets = (M100000011,); };
-                  M100000014 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-                  M100000013 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (M100000001, M100000003,); runOnlyForDeploymentPostprocessing = 0; };
-                  M100000017 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
-                  M100000018 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
-                  M100000019 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; INFOPLIST_FILE = CloudFlareScan/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
-                  M100000020 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; INFOPLIST_FILE = CloudFlareScan/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
-                  M100000012 = {isa = XCConfigurationList; buildConfigurations = (M100000019, M100000020,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-                  M100000016 = {isa = XCConfigurationList; buildConfigurations = (M100000017, M100000018,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+                  N100000001 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = N100000002 /* AppDelegate.m */; };
+                  N100000003 /* ViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = N100000004 /* ViewController.m */; };
+                  N100000002 /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
+                  N100000003 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
+                  N100000004 /* ViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ViewController.m; sourceTree = "<group>"; };
+                  N100000005 /* ViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ViewController.h; sourceTree = "<group>"; };
+                  N100000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+                  N100000007 /* CloudFlareScan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CloudFlareScan.app; sourceTree = BUILT_PRODUCTS_DIR; };
+                  N100000008 = {isa = PBXGroup; children = (N100000009, N100000010,); sourceTree = "<group>"; };
+                  N100000009 /* CloudFlareScan */ = {isa = PBXGroup; children = (N100000003, N100000002, N100000005, N100000004, N100000006,); path = CloudFlareScan; sourceTree = "<group>"; };
+                  N100000010 /* Products */ = {isa = PBXGroup; children = (N100000007,); name = Products; sourceTree = "<group>"; };
+                  N100000011 /* CloudFlareScan */ = {isa = PBXNativeTarget; buildConfigurationList = N100000012; buildPhases = (N100000013, N100000014,); buildRules = (); dependencies = (); name = CloudFlareScan; productName = CloudFlareScan; productReference = N100000007; productType = "com.apple.product-type.application"; };
+                  N100000015 /* Project object */ = {isa = PBXProject; attributes = {LastSwiftUpdateCheck = 1500; LastUpgradeCheck = 1500; TargetAttributes = {N100000011 = {CreatedOnToolsVersion = 15.0;};};}; buildConfigurationList = N100000016; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base,); mainGroup = N100000008; productRefGroup = N100000010; projectDirPath = ""; projectRoot = ""; targets = (N100000011,); };
+                  N100000014 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+                  N100000013 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (N100000001, N100000003,); runOnlyForDeploymentPostprocessing = 0; };
+                  N100000017 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
+                  N100000018 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
+                  N100000019 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; INFOPLIST_FILE = CloudFlareScan/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
+                  N100000020 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; INFOPLIST_FILE = CloudFlareScan/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
+                  N100000012 = {isa = XCConfigurationList; buildConfigurations = (N100000019, N100000020,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+                  N100000016 = {isa = XCConfigurationList; buildConfigurations = (N100000017, N100000018,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
               };
-              rootObject = M100000015;
+              rootObject = N100000015;
           }
           EOF
+
+          # 验证文件存在
+          ls -la CloudFlareScan.xcodeproj/
 
       - name: Build with xcodebuild
         run: |
