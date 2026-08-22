@@ -2,32 +2,227 @@ name: Build iOS IPA for TrollStore
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main, master ]
 
 jobs:
   build:
-    name: Build IPA
-    runs-on: macos-15
-    timeout-minutes: 30
+    runs-on: macos-latest
+    timeout-minutes: 10
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Xcode
+      - name: Create Web App
         run: |
-          sudo xcode-select -switch /Applications/Xcode.app/Contents/Developer
-          xcodebuild -version
+          mkdir -p CloudFlareScan
 
-      - name: Create iOS App
+          cat > CloudFlareScan/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>优选IP扫描</title>
+              <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body { background: #0a0e1a; color: #fff; font-family: -apple-system, sans-serif; padding: 16px; min-height: 100vh; }
+                  .card { background: #141b2e; border-radius: 12px; padding: 16px; margin-bottom: 12px; border: 1px solid #1a2a4a; }
+                  h2 { font-size: 18px; margin-bottom: 12px; color: #4fc3f7; }
+                  textarea { width: 100%; height: 100px; background: #0a0e1a; color: #fff; border: 1px solid #1a2a4a; border-radius: 8px; padding: 10px; font-size: 14px; font-family: monospace; resize: vertical; }
+                  .btn { padding: 10px 20px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; margin: 4px; }
+                  .btn-primary { background: #1976d2; color: #fff; }
+                  .btn-success { background: #2e7d32; color: #fff; }
+                  .btn-danger { background: #c62828; color: #fff; }
+                  .btn-secondary { background: #455a64; color: #fff; }
+                  .ip-item { display: flex; justify-content: space-between; padding: 8px 12px; background: #0a0e1a; border-radius: 6px; margin: 4px 0; font-size: 13px; }
+                  .stats { display: flex; gap: 16px; font-size: 13px; color: #90a4ae; }
+                  .stats span { color: #4fc3f7; font-weight: bold; }
+                  #output { height: 80px; }
+                  .btn-group { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+              </style>
+          </head>
+          <body>
+              <div class="card">
+                  <h2>🚀 优选IP筛选</h2>
+                  <div class="stats">
+                      <div>总数: <span id="total">0</span></div>
+                      <div>可用: <span id="available">0</span></div>
+                      <div>最佳: <span id="best">--</span></div>
+                  </div>
+              </div>
+
+              <div class="card">
+                  <h2>📂 导入IP (每行一个)</h2>
+                  <textarea id="input">1.1.1.1
+          8.8.8.8
+          9.9.9.9
+          104.16.0.0</textarea>
+                  <div class="btn-group">
+                      <button class="btn btn-primary" onclick="importIPs()">📥 导入</button>
+                      <button class="btn btn-success" onclick="startScan()">▶ 开始</button>
+                      <button class="btn btn-danger" onclick="stopScan()">⏹ 停止</button>
+                      <button class="btn btn-secondary" onclick="copyResults()">📋 复制</button>
+                  </div>
+              </div>
+
+              <div class="card">
+                  <h2>📋 可用IP</h2>
+                  <div id="ipList"><div style="color:#666;text-align:center;padding:20px;">暂无数据</div></div>
+              </div>
+
+              <div class="card">
+                  <h2>📝 输出</h2>
+                  <textarea id="output" readonly></textarea>
+                  <button class="btn btn-secondary" onclick="copyOutput()">📋 复制输出</button>
+              </div>
+
+              <script>
+                  let ipList = [];
+                  let results = [];
+                  let isScanning = false;
+                  let scanTimer = null;
+
+                  function importIPs() {
+                      const text = document.getElementById('input').value;
+                      const lines = text.split('\n').filter(l => l.trim());
+                      ipList = lines.map(l => {
+                          const parts = l.trim().split(':');
+                          return { ip: parts[0], port: parseInt(parts[1]) || 443 };
+                      });
+                      document.getElementById('total').textContent = ipList.length;
+                      document.getElementById('available').textContent = '0';
+                      document.getElementById('best').textContent = '--';
+                      results = [];
+                      renderIPs();
+                      showStatus('已导入 ' + ipList.length + ' 个IP');
+                  }
+
+                  async function startScan() {
+                      if (ipList.length === 0) {
+                          showStatus('请先导入IP');
+                          return;
+                      }
+                      isScanning = true;
+                      results = [];
+                      showStatus('扫描中...');
+
+                      const port = 443;
+                      let found = 0;
+                      const allResults = [];
+
+                      for (const ip of ipList) {
+                          if (!isScanning) break;
+                          const result = await checkIP(ip.ip, port);
+                          if (result) {
+                              allResults.push(result);
+                              found++;
+                              results = allResults;
+                              renderIPs();
+                              document.getElementById('available').textContent = found;
+                              const delays = allResults.map(r => r.delay);
+                              if (delays.length > 0) {
+                                  document.getElementById('best').textContent = Math.min(...delays).toFixed(0) + 'ms';
+                              }
+                              showStatus('扫描中... ' + found + ' 个可用');
+                          }
+                      }
+
+                      isScanning = false;
+                      results = allResults;
+                      renderIPs();
+                      showStatus('✅ 完成！共 ' + results.length + ' 个可用IP');
+                      updateOutput();
+                  }
+
+                  function checkIP(ip, port) {
+                      return new Promise((resolve) => {
+                          const url = 'https://' + ip + ':' + port + '/cdn-cgi/trace';
+                          const start = Date.now();
+                          fetch(url, { mode: 'cors' })
+                              .then(res => {
+                                  if (res.ok) {
+                                      const delay = Date.now() - start;
+                                      res.text().then(text => {
+                                          let colo = '';
+                                          text.split('\n').forEach(line => {
+                                              if (line.startsWith('colo=')) colo = line.substring(5);
+                                          });
+                                          fetch('http://ip-api.com/json/' + ip + '?fields=country')
+                                              .then(r => r.json())
+                                              .then(data => {
+                                                  resolve({
+                                                      ip: ip,
+                                                      port: port,
+                                                      delay: delay,
+                                                      country: data.country || '',
+                                                      colo: colo
+                                                  });
+                                              })
+                                              .catch(() => resolve(null));
+                                      });
+                                  } else {
+                                      resolve(null);
+                                  }
+                              })
+                              .catch(() => resolve(null));
+                      });
+                  }
+
+                  function stopScan() {
+                      isScanning = false;
+                      showStatus('已停止');
+                  }
+
+                  function renderIPs() {
+                      const container = document.getElementById('ipList');
+                      if (results.length === 0) {
+                          container.innerHTML = '<div style="color:#666;text-align:center;padding:20px;">暂无数据</div>';
+                          return;
+                      }
+                      container.innerHTML = results.map(r =>
+                          '<div class="ip-item">' +
+                          '<span>' + r.ip + ':' + r.port + '</span>' +
+                          '<span style="color:' + (r.delay < 50 ? '#4caf50' : r.delay < 100 ? '#ff9800' : '#f44336') + '">' + r.delay.toFixed(0) + 'ms</span>' +
+                          '<span style="color:#90a4ae;">' + (r.country || '') + ' ' + (r.colo || '') + '</span>' +
+                          '</div>'
+                      ).join('');
+                  }
+
+                  function updateOutput() {
+                      const text = results.map(r => r.ip + ':' + r.port + '  [' + r.delay.toFixed(0) + 'ms]  ' + r.country + '  ' + r.colo).join('\n');
+                      document.getElementById('output').value = text;
+                  }
+
+                  function copyResults() {
+                      const text = results.map(r => r.ip + ':' + r.port).join('\n');
+                      if (text) {
+                          navigator.clipboard.writeText(text).then(() => showStatus('✅ 已复制'));
+                      }
+                  }
+
+                  function copyOutput() {
+                      const text = document.getElementById('output').value;
+                      if (text) {
+                          navigator.clipboard.writeText(text).then(() => showStatus('✅ 已复制输出'));
+                      }
+                  }
+
+                  function showStatus(msg) {
+                      document.querySelector('.stats').innerHTML = msg;
+                  }
+
+                  // 自动导入示例
+                  window.onload = function() {
+                      importIPs();
+                  };
+              </script>
+          </body>
+          </html>
+          EOF
+
+      - name: Package as Web App
         run: |
-          # 创建项目目录
-          mkdir -p MyApp
-          cd MyApp
+          mkdir -p Payload/CloudFlareScan.app
+          cp CloudFlareScan/index.html Payload/CloudFlareScan.app/
 
-          # 创建 Info.plist
-          cat > Info.plist << 'EOF'
+          cat > Payload/CloudFlareScan.app/Info.plist << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -35,9 +230,9 @@ jobs:
               <key>CFBundleDevelopmentRegion</key>
               <string>zh_CN</string>
               <key>CFBundleExecutable</key>
-              <string>MyApp</string>
+              <string>index.html</string>
               <key>CFBundleIdentifier</key>
-              <string>com.myapp.ios</string>
+              <string>com.cloudflarescan.ios</string>
               <key>CFBundleInfoDictionaryVersion</key>
               <string>6.0</string>
               <key>CFBundleName</key>
@@ -55,519 +250,10 @@ jobs:
                   <key>NSAllowsArbitraryLoads</key>
                   <true/>
               </dict>
-              <key>UIRequiredDeviceCapabilities</key>
-              <array>
-                  <string>armv7</string>
-              </array>
-              <key>UISupportedInterfaceOrientations</key>
-              <array>
-                  <string>UIInterfaceOrientationPortrait</string>
-              </array>
           </dict>
           </plist>
           EOF
 
-          # 创建 main.m
-          cat > main.m << 'EOF'
-          #import <UIKit/UIKit.h>
-
-          int main(int argc, char * argv[]) {
-              @autoreleasepool {
-                  return UIApplicationMain(argc, argv, nil, @"AppDelegate");
-              }
-          }
-          EOF
-
-          # AppDelegate.h
-          cat > AppDelegate.h << 'EOF'
-          #import <UIKit/UIKit.h>
-
-          @interface AppDelegate : UIResponder <UIApplicationDelegate>
-          @property (strong, nonatomic) UIWindow *window;
-          @end
-          EOF
-
-          # AppDelegate.m
-          cat > AppDelegate.m << 'EOF'
-          #import "AppDelegate.h"
-          #import "ViewController.h"
-
-          @implementation AppDelegate
-
-          - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
-              self.window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-              self.window.rootViewController = [[UINavigationController alloc] initWithRootViewController:[[ViewController alloc] init]];
-              [self.window makeKeyAndVisible];
-              return YES;
-          }
-
-          @end
-          EOF
-
-          # ViewController.h
-          cat > ViewController.h << 'EOF'
-          #import <UIKit/UIKit.h>
-
-          @interface ViewController : UIViewController <UITableViewDelegate, UITableViewDataSource>
-          @end
-          EOF
-
-          # ViewController.m - 完整功能
-          cat > ViewController.m << 'EOF'
-          #import "ViewController.h"
-
-          @interface IPInfo : NSObject
-          @property (nonatomic, strong) NSString *ip;
-          @property (nonatomic, assign) NSInteger port;
-          @property (nonatomic, assign) double delay;
-          @property (nonatomic, strong) NSString *country;
-          @property (nonatomic, strong) NSString *colo;
-          @end
-
-          @implementation IPInfo
-          @end
-
-          @interface ViewController ()
-          @property (nonatomic, strong) NSMutableArray<IPInfo *> *results;
-          @property (nonatomic, strong) UITextView *inputView;
-          @property (nonatomic, strong) UITableView *tableView;
-          @property (nonatomic, strong) UILabel *statusLabel;
-          @property (nonatomic, strong) UILabel *countLabel;
-          @property (nonatomic, strong) UIButton *scanBtn;
-          @property (nonatomic, strong) UIButton *stopBtn;
-          @property (nonatomic, assign) BOOL isScanning;
-          @property (nonatomic, strong) NSOperationQueue *queue;
-          @end
-
-          @implementation ViewController
-
-          - (void)viewDidLoad {
-              [super viewDidLoad];
-              self.view.backgroundColor = [UIColor colorWithRed:0.06 green:0.08 blue:0.15 alpha:1];
-              self.title = @"🚀 优选IP筛选";
-              self.results = [NSMutableArray array];
-              self.queue = [[NSOperationQueue alloc] init];
-              self.queue.maxConcurrentOperationCount = 100;
-
-              [self setupUI];
-              [self detectISP];
-          }
-
-          - (void)setupUI {
-              UIScrollView *scroll = [[UIScrollView alloc] init];
-              scroll.translatesAutoresizingMaskIntoConstraints = NO;
-              [self.view addSubview:scroll];
-
-              [NSLayoutConstraint activateConstraints:@[
-                  [scroll.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
-                  [scroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-                  [scroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-                  [scroll.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor]
-              ]];
-
-              UIView *content = [[UIView alloc] init];
-              content.translatesAutoresizingMaskIntoConstraints = NO;
-              [scroll addSubview:content];
-
-              [NSLayoutConstraint activateConstraints:@[
-                  [content.topAnchor constraintEqualToAnchor:scroll.topAnchor],
-                  [content.leadingAnchor constraintEqualToAnchor:scroll.leadingAnchor],
-                  [content.trailingAnchor constraintEqualToAnchor:scroll.trailingAnchor],
-                  [content.bottomAnchor constraintEqualToAnchor:scroll.bottomAnchor],
-                  [content.widthAnchor constraintEqualToAnchor:scroll.widthAnchor]
-              ]];
-
-              CGFloat w = self.view.bounds.size.width - 24;
-              CGFloat y = 12;
-
-              // 状态
-              self.statusLabel = [[UILabel alloc] init];
-              self.statusLabel.text = @"就绪";
-              self.statusLabel.textColor = [UIColor grayColor];
-              self.statusLabel.font = [UIFont systemFontOfSize:12];
-              self.statusLabel.frame = CGRectMake(12, y, 200, 20);
-              [content addSubview:self.statusLabel];
-
-              UILabel *ispLabel = [[UILabel alloc] init];
-              ispLabel.text = @"📍 检测中...";
-              ispLabel.textColor = [UIColor colorWithRed:0 green:0.78 blue:0.98 alpha:1];
-              ispLabel.font = [UIFont systemFontOfSize:12];
-              ispLabel.textAlignment = NSTextAlignmentRight;
-              ispLabel.tag = 100;
-              ispLabel.frame = CGRectMake(w - 180, y, 180, 20);
-              [content addSubview:ispLabel];
-
-              y += 28;
-
-              self.countLabel = [[UILabel alloc] init];
-              self.countLabel.text = @"总数: 0  可用: 0  最佳: --";
-              self.countLabel.textColor = [UIColor whiteColor];
-              self.countLabel.font = [UIFont systemFontOfSize:14];
-              self.countLabel.frame = CGRectMake(12, y, w, 24);
-              [content addSubview:self.countLabel];
-
-              y += 32;
-
-              // 输入框
-              UIView *inputBg = [[UIView alloc] init];
-              inputBg.backgroundColor = [UIColor colorWithRed:0.10 green:0.13 blue:0.22 alpha:1];
-              inputBg.layer.cornerRadius = 8;
-              inputBg.frame = CGRectMake(12, y, w, 120);
-              [content addSubview:inputBg];
-
-              UILabel *inputLabel = [[UILabel alloc] init];
-              inputLabel.text = @"📂 导入IP (每行一个)";
-              inputLabel.textColor = [UIColor grayColor];
-              inputLabel.font = [UIFont systemFontOfSize:12];
-              inputLabel.frame = CGRectMake(12, 8, 200, 20);
-              [inputBg addSubview:inputLabel];
-
-              self.inputView = [[UITextView alloc] init];
-              self.inputView.backgroundColor = [UIColor colorWithRed:0.06 green:0.08 blue:0.15 alpha:1];
-              self.inputView.textColor = [UIColor whiteColor];
-              self.inputView.font = [UIFont systemFontOfSize:12];
-              self.inputView.layer.cornerRadius = 4;
-              self.inputView.text = @"1.1.1.1\n8.8.8.8\n9.9.9.9\n104.16.0.0";
-              self.inputView.frame = CGRectMake(8, 34, inputBg.bounds.size.width - 16, 76);
-              [inputBg addSubview:self.inputView];
-
-              y += 128;
-
-              // 按钮
-              UIView *btnBg = [[UIView alloc] init];
-              btnBg.backgroundColor = [UIColor colorWithRed:0.10 green:0.13 blue:0.22 alpha:1];
-              btnBg.layer.cornerRadius = 8;
-              btnBg.frame = CGRectMake(12, y, w, 50);
-              [content addSubview:btnBg];
-
-              self.scanBtn = [self makeButton:@"▶ 开始" color:[UIColor blueColor] frame:CGRectMake(12, 8, 80, 34)];
-              [self.scanBtn addTarget:self action:@selector(startScan) forControlEvents:UIControlEventTouchUpInside];
-              [btnBg addSubview:self.scanBtn];
-
-              self.stopBtn = [self makeButton:@"⏹ 停止" color:[UIColor redColor] frame:CGRectMake(100, 8, 70, 34)];
-              [self.stopBtn addTarget:self action:@selector(stopScan) forControlEvents:UIControlEventTouchUpInside];
-              self.stopBtn.enabled = NO;
-              [btnBg addSubview:self.stopBtn];
-
-              UIButton *importBtn = [self makeButton:@"📥 导入" color:[UIColor greenColor] frame:CGRectMake(180, 8, 60, 34)];
-              [importBtn addTarget:self action:@selector(importIPs) forControlEvents:UIControlEventTouchUpInside];
-              [btnBg addSubview:importBtn];
-
-              UIButton *copyBtn = [self makeButton:@"📋 复制" color:[UIColor purpleColor] frame:CGRectMake(248, 8, 60, 34)];
-              [copyBtn addTarget:self action:@selector(copyResults) forControlEvents:UIControlEventTouchUpInside];
-              [btnBg addSubview:copyBtn];
-
-              y += 58;
-
-              // 列表
-              UIView *tableBg = [[UIView alloc] init];
-              tableBg.backgroundColor = [UIColor colorWithRed:0.10 green:0.13 blue:0.22 alpha:1];
-              tableBg.layer.cornerRadius = 8;
-              tableBg.frame = CGRectMake(12, y, w, 200);
-              [content addSubview:tableBg];
-
-              UILabel *tableLabel = [[UILabel alloc] init];
-              tableLabel.text = @"📋 可用IP";
-              tableLabel.textColor = [UIColor whiteColor];
-              tableLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-              tableLabel.frame = CGRectMake(12, 8, 200, 22);
-              [tableBg addSubview:tableLabel];
-
-              self.tableView = [[UITableView alloc] init];
-              self.tableView.backgroundColor = [UIColor clearColor];
-              self.tableView.delegate = self;
-              self.tableView.dataSource = self;
-              self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
-              self.tableView.frame = CGRectMake(0, 36, tableBg.bounds.size.width, 160);
-              [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:@"Cell"];
-              [tableBg addSubview:self.tableView];
-
-              y += 208;
-
-              // 输出
-              UIView *outBg = [[UIView alloc] init];
-              outBg.backgroundColor = [UIColor colorWithRed:0.10 green:0.13 blue:0.22 alpha:1];
-              outBg.layer.cornerRadius = 8;
-              outBg.frame = CGRectMake(12, y, w, 120);
-              [content addSubview:outBg];
-
-              UILabel *outLabel = [[UILabel alloc] init];
-              outLabel.text = @"📝 输出";
-              outLabel.textColor = [UIColor grayColor];
-              outLabel.font = [UIFont systemFontOfSize:12];
-              outLabel.frame = CGRectMake(12, 8, 200, 20);
-              [outBg addSubview:outLabel];
-
-              UITextView *outView = [[UITextView alloc] init];
-              outView.backgroundColor = [UIColor colorWithRed:0.06 green:0.08 blue:0.15 alpha:1];
-              outView.textColor = [UIColor grayColor];
-              outView.font = [UIFont systemFontOfSize:11];
-              outView.layer.cornerRadius = 4;
-              outView.tag = 200;
-              outView.frame = CGRectMake(8, 34, outBg.bounds.size.width - 16, 76);
-              [outBg addSubview:outView];
-
-              y += 128;
-
-              content.frame = CGRectMake(0, 0, self.view.bounds.size.width, y + 20);
-              scroll.contentSize = content.frame.size;
-          }
-
-          - (UIButton *)makeButton:(NSString *)title color:(UIColor *)color frame:(CGRect)frame {
-              UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
-              [btn setTitle:title forState:UIControlStateNormal];
-              [btn setTitleColor:color forState:UIControlStateNormal];
-              btn.titleLabel.font = [UIFont systemFontOfSize:13];
-              btn.backgroundColor = [color colorWithAlphaComponent:0.15];
-              btn.layer.cornerRadius = 6;
-              btn.frame = frame;
-              return btn;
-          }
-
-          - (void)detectISP {
-              NSURL *url = [NSURL URLWithString:@"http://ip-api.com/json/?fields=isp"];
-              [[[NSURLSession sharedSession] dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-                  if (data) {
-                      NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-                      if (json[@"isp"]) {
-                          dispatch_async(dispatch_get_main_queue(), ^{
-                              UILabel *l = [self.view viewWithTag:100];
-                              l.text = [NSString stringWithFormat:@"📍 %@", json[@"isp"]];
-                          });
-                      }
-                  }
-              }] resume];
-          }
-
-          - (void)importIPs {
-              [self.results removeAllObjects];
-              [self.tableView reloadData];
-              self.statusLabel.text = @"已导入";
-              self.countLabel.text = @"总数: 0  可用: 0  最佳: --";
-              [self.view endEditing:YES];
-          }
-
-          - (void)startScan {
-              NSString *text = self.inputView.text;
-              NSArray *lines = [text componentsSeparatedByString:@"\n"];
-              NSMutableArray *ips = [NSMutableArray array];
-
-              for (NSString *line in lines) {
-                  NSString *trim = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-                  if (trim.length == 0) continue;
-                  NSArray *parts = [trim componentsSeparatedByString:@":"];
-                  NSString *ip = parts.firstObject;
-                  NSInteger port = 443;
-                  if (parts.count > 1) port = [parts[1] integerValue];
-                  if (port == 0) port = 443;
-                  if ([ip containsString:@"."]) {
-                      IPInfo *info = [[IPInfo alloc] init];
-                      info.ip = ip;
-                      info.port = port;
-                      [ips addObject:info];
-                  }
-              }
-
-              if (ips.count == 0) {
-                  self.statusLabel.text = @"请导入有效IP";
-                  return;
-              }
-
-              [self.results removeAllObjects];
-              self.isScanning = YES;
-              self.scanBtn.enabled = NO;
-              self.stopBtn.enabled = YES;
-              self.statusLabel.text = @"扫描中...";
-
-              NSMutableArray *allResults = [NSMutableArray array];
-              NSLock *lock = [[NSLock alloc] init];
-              dispatch_group_t group = dispatch_group_create();
-              dispatch_semaphore_t sem = dispatch_semaphore_create(100);
-
-              for (IPInfo *info in ips) {
-                  dispatch_group_enter(group);
-                  dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
-                  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-                      [self checkIP:info completion:^(IPInfo *result) {
-                          [lock lock];
-                          if (result) [allResults addObject:result];
-                          [lock unlock];
-                          dispatch_semaphore_signal(sem);
-                          dispatch_group_leave(group);
-
-                          dispatch_async(dispatch_get_main_queue(), ^{
-                              self.results = [allResults mutableCopy];
-                              [self updateUI];
-                          });
-                      }];
-                  });
-              }
-
-              dispatch_group_notify(group, dispatch_get_main_queue(), ^{
-                  self.isScanning = NO;
-                  self.scanBtn.enabled = YES;
-                  self.stopBtn.enabled = NO;
-                  self.statusLabel.text = [NSString stringWithFormat:@"✅ 完成！共 %lu 个", (unsigned long)self.results.count];
-                  [self updateUI];
-              });
-          }
-
-          - (void)checkIP:(IPInfo *)info completion:(void(^)(IPInfo *))completion {
-              NSString *urlStr = [NSString stringWithFormat:@"https://%@:%ld/cdn-cgi/trace", info.ip, (long)info.port];
-              NSURL *url = [NSURL URLWithString:urlStr];
-              NSDate *start = [NSDate date];
-
-              NSURLSessionConfiguration *cfg = [NSURLSessionConfiguration defaultSessionConfiguration];
-              cfg.timeoutIntervalForRequest = 3;
-              NSURLSession *session = [NSURLSession sessionWithConfiguration:cfg];
-
-              [[session dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-                  if (data) {
-                      NSHTTPURLResponse *http = (NSHTTPURLResponse *)response;
-                      if (http.statusCode == 200) {
-                          double delay = [[NSDate date] timeIntervalSinceDate:start] * 1000;
-                          NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-                          NSString *colo = @"";
-                          for (NSString *line in [text componentsSeparatedByString:@"\n"]) {
-                              if ([line hasPrefix:@"colo="]) {
-                                  colo = [line substringFromIndex:5];
-                                  break;
-                              }
-                          }
-
-                          IPInfo *result = [[IPInfo alloc] init];
-                          result.ip = info.ip;
-                          result.port = info.port;
-                          result.delay = delay;
-                          result.colo = colo;
-
-                          // 获取地区
-                          NSString *locUrl = [NSString stringWithFormat:@"http://ip-api.com/json/%@?fields=country", info.ip];
-                          [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:locUrl] completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
-                              if (d) {
-                                  NSDictionary *json = [NSJSONSerialization JSONObjectWithData:d options:0 error:nil];
-                                  result.country = json[@"country"] ?: @"";
-                              }
-                              completion(result);
-                          }] resume];
-                          return;
-                      }
-                  }
-                  completion(nil);
-              }] resume];
-          }
-
-          - (void)stopScan {
-              self.isScanning = NO;
-              self.scanBtn.enabled = YES;
-              self.stopBtn.enabled = NO;
-              self.statusLabel.text = @"已停止";
-              [self.queue cancelAllOperations];
-          }
-
-          - (void)updateUI {
-              NSMutableArray *delays = [NSMutableArray array];
-              for (IPInfo *info in self.results) {
-                  if (info.delay > 0) [delays addObject:@(info.delay)];
-              }
-              double best = 0;
-              if (delays.count > 0) {
-                  [delays sortUsingComparator:^NSComparisonResult(NSNumber *a, NSNumber *b) { return [a compare:b]; }];
-                  best = [delays.firstObject doubleValue];
-              }
-
-              self.countLabel.text = [NSString stringWithFormat:@"总数: %lu  可用: %lu  最佳: %.0fms",
-                                      (unsigned long)(self.inputView.text componentsSeparatedByString:@"\n").count,
-                                      (unsigned long)self.results.count,
-                                      best];
-
-              [self.tableView reloadData];
-
-              NSMutableString *outText = [NSMutableString string];
-              for (IPInfo *info in self.results) {
-                  [outText appendFormat:@"%@:%ld  [%.0fms]  %@  %@\n", info.ip, (long)info.port, info.delay, info.country, info.colo];
-              }
-              UITextView *outView = [self.view viewWithTag:200];
-              outView.text = outText.length > 0 ? outText : @"暂无数据";
-              outView.textColor = outText.length > 0 ? [UIColor whiteColor] : [UIColor grayColor];
-          }
-
-          - (void)copyResults {
-              NSMutableString *text = [NSMutableString string];
-              for (IPInfo *info in self.results) {
-                  [text appendFormat:@"%@:%ld\n", info.ip, (long)info.port];
-              }
-              if (text.length > 0) {
-                  [UIPasteboard generalPasteboard].string = text;
-                  self.statusLabel.text = @"✅ 已复制";
-              }
-          }
-
-          - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-              return self.results.count;
-          }
-
-          - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-              UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"Cell" forIndexPath:indexPath];
-              cell.backgroundColor = [UIColor clearColor];
-              cell.textLabel.textColor = [UIColor whiteColor];
-              cell.textLabel.font = [UIFont systemFontOfSize:12];
-
-              IPInfo *info = self.results[indexPath.row];
-              UIColor *color = info.delay < 50 ? [UIColor greenColor] : (info.delay < 100 ? [UIColor orangeColor] : [UIColor redColor]);
-              NSString *colo = info.colo.length > 0 ? [NSString stringWithFormat:@"🏢%@", info.colo] : @"";
-              cell.textLabel.text = [NSString stringWithFormat:@"%@:%ld  [%.0fms]  %@  %@", info.ip, (long)info.port, info.delay, info.country, colo];
-              return cell;
-          }
-
-          - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
-              return 30;
-          }
-
-          @end
-          EOF
-
-          cd ..
-
-      - name: Compile with Clang
-        run: |
-          cd MyApp
-
-          # 编译
-          clang -arch arm64 \
-            -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
-            -mios-version-min=15.0 \
-            -framework UIKit \
-            -framework Foundation \
-            -framework SwiftUI \
-            -framework Network \
-            -framework CoreGraphics \
-            -fobjc-arc \
-            -c *.m
-
-          # 链接
-          clang -arch arm64 \
-            -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
-            -mios-version-min=15.0 \
-            -framework UIKit \
-            -framework Foundation \
-            -framework SwiftUI \
-            -framework Network \
-            -framework CoreGraphics \
-            -fobjc-arc \
-            *.o \
-            -o MyApp
-
-          # 创建 .app
-          mkdir -p MyApp.app
-          cp MyApp MyApp.app/
-          cp Info.plist MyApp.app/
-
-          cd ..
-
-      - name: Package IPA
-        run: |
-          cp -R MyApp/MyApp.app Payload/
           zip -r CloudFlareScan.ipa Payload
           cp CloudFlareScan.ipa CloudFlareScan.tipa
 
