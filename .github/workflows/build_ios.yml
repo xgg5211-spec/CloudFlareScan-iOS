@@ -20,53 +20,10 @@ jobs:
           sudo xcode-select -switch /Applications/Xcode.app/Contents/Developer
           xcodebuild -version
 
-      - name: Create iOS Project
+      - name: Create Project
         run: |
           mkdir -p CloudFlareScan
           mkdir -p CloudFlareScan.xcodeproj
-
-          # Info.plist - 不指定图标
-          cat > CloudFlareScan/Info.plist << 'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleDevelopmentRegion</key>
-              <string>zh_CN</string>
-              <key>CFBundleExecutable</key>
-              <string>$(EXECUTABLE_NAME)</string>
-              <key>CFBundleIdentifier</key>
-              <string>com.cloudflarescan.ios</string>
-              <key>CFBundleInfoDictionaryVersion</key>
-              <string>6.0</string>
-              <key>CFBundleName</key>
-              <string>优选IP筛选</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-              <key>CFBundleShortVersionString</key>
-              <string>1.0</string>
-              <key>CFBundleVersion</key>
-              <string>1</string>
-              <key>LSRequiresIPhoneOS</key>
-              <true/>
-              <key>NSAppTransportSecurity</key>
-              <dict>
-                  <key>NSAllowsArbitraryLoads</key>
-                  <true/>
-              </dict>
-              <key>UILaunchScreen</key>
-              <dict/>
-              <key>UIRequiredDeviceCapabilities</key>
-              <array>
-                  <string>armv7</string>
-              </array>
-              <key>UISupportedInterfaceOrientations</key>
-              <array>
-                  <string>UIInterfaceOrientationPortrait</string>
-              </array>
-          </dict>
-          </plist>
-          EOF
 
       - name: Create Source Files
         run: |
@@ -89,7 +46,7 @@ jobs:
           }
           EOF
 
-          # ContentView.swift - 完整功能
+          # ContentView.swift
           cat > CloudFlareScan/ContentView.swift << 'EOF'
           import SwiftUI
 
@@ -165,7 +122,6 @@ jobs:
                   let lock = NSLock()
                   let group = DispatchGroup()
                   let semaphore = DispatchSemaphore(value: 100)
-                  var processed = 0
 
                   for ip in ips {
                       group.enter()
@@ -176,7 +132,6 @@ jobs:
                               if let r = result {
                                   allResults.append(r)
                               }
-                              processed += 1
                               lock.unlock()
                               semaphore.signal()
                               group.leave()
@@ -285,14 +240,12 @@ jobs:
           struct ContentView: View {
               @StateObject private var manager = ScanManager()
               @State private var alertMsg = ""
-              @State private var showCopyMenu = false
 
               var body: some View {
                   ZStack {
                       Color(red: 0.06, green: 0.08, blue: 0.15).ignoresSafeArea()
 
                       VStack(spacing: 0) {
-                          // 标题栏
                           HStack {
                               Text("🚀 优选IP筛选")
                                   .font(.title2)
@@ -306,7 +259,6 @@ jobs:
                           .padding(.horizontal)
                           .padding(.top, 12)
 
-                          // 统计栏
                           HStack(spacing: 12) {
                               VStack { Text("总数").font(.caption2).foregroundColor(.gray); Text("\(manager.ipList.count)").foregroundColor(.white) }
                               VStack { Text("可用").font(.caption2).foregroundColor(.gray); Text("\(manager.availableCount)").foregroundColor(.green) }
@@ -321,7 +273,6 @@ jobs:
                           .cornerRadius(8)
                           .padding(.horizontal)
 
-                          // 输入区
                           VStack(alignment: .leading, spacing: 4) {
                               Text("📂 导入IP (每行一个)").font(.caption).foregroundColor(.gray)
                               TextEditor(text: $manager.inputText)
@@ -334,7 +285,6 @@ jobs:
                           .padding(.horizontal)
                           .padding(.top, 8)
 
-                          // 操作按钮
                           HStack(spacing: 8) {
                               Button("📥 导入") {
                                   manager.importIPs()
@@ -378,7 +328,6 @@ jobs:
                           .padding(.horizontal)
                           .padding(.vertical, 6)
 
-                          // 筛选
                           HStack {
                               Text("🔍 地区")
                                   .font(.caption2)
@@ -403,7 +352,6 @@ jobs:
                           .padding(.horizontal)
                           .padding(.vertical, 4)
 
-                          // 结果列表
                           List(manager.results) { ip in
                               HStack {
                                   Text(ip.ip)
@@ -431,7 +379,6 @@ jobs:
                           .listStyle(.plain)
                           .scrollContentBackground(.hidden)
 
-                          // 输出
                           VStack(alignment: .leading, spacing: 4) {
                               Text("📝 输出").font(.caption).foregroundColor(.gray)
                               let outputText = manager.results.map { "\($0.ip):\($0.port)  [\(String(format: "%.0f", $0.delay))ms]  \($0.country)  \($0.colo)" }.joined(separator: "\n")
@@ -466,28 +413,26 @@ jobs:
               classes = {};
               objectVersion = 56;
               objects = {
-                  I100000001 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = I100000002 /* AppDelegate.swift */; };
-                  I100000003 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = I100000004 /* ContentView.swift */; };
-                  I100000005 /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = I100000006 /* Info.plist */; };
-                  I100000002 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
-                  I100000004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-                  I100000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-                  I100000007 /* CloudFlareScan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CloudFlareScan.app; sourceTree = BUILT_PRODUCTS_DIR; };
-                  I100000008 = {isa = PBXGroup; children = (I100000009, I100000010,); sourceTree = "<group>"; };
-                  I100000009 /* CloudFlareScan */ = {isa = PBXGroup; children = (I100000002, I100000004, I100000006,); path = CloudFlareScan; sourceTree = "<group>"; };
-                  I100000010 /* Products */ = {isa = PBXGroup; children = (I100000007,); name = Products; sourceTree = "<group>"; };
-                  I100000011 /* CloudFlareScan */ = {isa = PBXNativeTarget; buildConfigurationList = I100000012; buildPhases = (I100000013, I100000014,); buildRules = (); dependencies = (); name = CloudFlareScan; productName = CloudFlareScan; productReference = I100000007; productType = "com.apple.product-type.application"; };
-                  I100000015 /* Project object */ = {isa = PBXProject; attributes = {LastSwiftUpdateCheck = 1500; LastUpgradeCheck = 1500; TargetAttributes = {I100000011 = {CreatedOnToolsVersion = 15.0;};};}; buildConfigurationList = I100000016; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base,); mainGroup = I100000008; productRefGroup = I100000010; projectDirPath = ""; projectRoot = ""; targets = (I100000011,); };
-                  I100000014 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (I100000005,); runOnlyForDeploymentPostprocessing = 0; };
-                  I100000013 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (I100000001, I100000003,); runOnlyForDeploymentPostprocessing = 0; };
-                  I100000017 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
-                  I100000018 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
-                  I100000019 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; INFOPLIST_FILE = CloudFlareScan/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; SWIFT_VERSION = 5.0; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
-                  I100000020 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; INFOPLIST_FILE = CloudFlareScan/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; SWIFT_VERSION = 5.0; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
-                  I100000012 = {isa = XCConfigurationList; buildConfigurations = (I100000019, I100000020,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-                  I100000016 = {isa = XCConfigurationList; buildConfigurations = (I100000017, I100000018,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+                  J100000001 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = J100000002 /* AppDelegate.swift */; };
+                  J100000003 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = J100000004 /* ContentView.swift */; };
+                  J100000002 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+                  J100000004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+                  J100000005 /* CloudFlareScan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CloudFlareScan.app; sourceTree = BUILT_PRODUCTS_DIR; };
+                  J100000006 = {isa = PBXGroup; children = (J100000007, J100000008,); sourceTree = "<group>"; };
+                  J100000007 /* CloudFlareScan */ = {isa = PBXGroup; children = (J100000002, J100000004,); path = CloudFlareScan; sourceTree = "<group>"; };
+                  J100000008 /* Products */ = {isa = PBXGroup; children = (J100000005,); name = Products; sourceTree = "<group>"; };
+                  J100000009 /* CloudFlareScan */ = {isa = PBXNativeTarget; buildConfigurationList = J100000010; buildPhases = (J100000011, J100000012,); buildRules = (); dependencies = (); name = CloudFlareScan; productName = CloudFlareScan; productReference = J100000005; productType = "com.apple.product-type.application"; };
+                  J100000013 /* Project object */ = {isa = PBXProject; attributes = {LastSwiftUpdateCheck = 1500; LastUpgradeCheck = 1500; TargetAttributes = {J100000009 = {CreatedOnToolsVersion = 15.0;};};}; buildConfigurationList = J100000014; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base,); mainGroup = J100000006; productRefGroup = J100000008; projectDirPath = ""; projectRoot = ""; targets = (J100000009,); };
+                  J100000012 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+                  J100000011 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (J100000001, J100000003,); runOnlyForDeploymentPostprocessing = 0; };
+                  J100000015 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
+                  J100000016 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
+                  J100000017 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = YES; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; SWIFT_VERSION = 5.0; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
+                  J100000018 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = YES; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; SWIFT_VERSION = 5.0; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
+                  J100000010 = {isa = XCConfigurationList; buildConfigurations = (J100000017, J100000018,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+                  J100000014 = {isa = XCConfigurationList; buildConfigurations = (J100000015, J100000016,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
               };
-              rootObject = I100000015;
+              rootObject = J100000013;
           }
           EOF
 
@@ -501,8 +446,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            ONLY_ACTIVE_ARCH=NO \
-            -quiet
+            ONLY_ACTIVE_ARCH=NO
 
       - name: Package IPA
         run: |
