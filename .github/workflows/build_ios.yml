@@ -1,3 +1,6 @@
+加完整打包步骤，生成 IPA：
+
+```yaml
 name: IPSelector Build
 
 on:
@@ -6,7 +9,7 @@ on:
     - cron: '0 4 * * *'
 
 permissions:
-  contents: write
+ contents: write
 
 jobs:
   build:
@@ -44,7 +47,6 @@ jobs:
           cat > IPSelector/ContentView.swift << 'EOF'
           import SwiftUI
           import Foundation
-          
           struct ContentView: View {
               @StateObject var vm = ProxyVM()
               var body: some View {
@@ -67,3 +69,43 @@ jobs:
               }
           }
           EOF
+
+      - name: Create Xcode Project
+        run: |
+          xcodebuild -create-xcodeproj \
+            -project IPSelector.xcodeproj \
+            -scheme IPSelector \
+            -destination "generic/platform=iOS" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Build .app
+        run: |
+          xcodebuild build \
+            -project IPSelector.xcodeproj \
+            -scheme IPSelector \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -r build/Release-iphoneos/IPSelector.app Payload/
+          zip -r IPSelector.ipa Payload
+
+      - name: Sign IPA
+        run: |
+          openssl req -newkey rsa:2048 -nodes -keyout key.pem -x509 -days 3650 -out cert.pem \
+            -subj "/CN=IPSelector"
+          openssl pkcs12 -export -in cert.pem -inkey key.pem -out cert.p12 -passout pass:
+          zsign -k key.pem -c cert.pem -p cert.p12 -P "" -b com.ipselector.tool \
+            -n IPSelector -o IPSelector-signed.ipa IPSelector.ipa
+
+      - name: Upload Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "IPSelector v2.0"
+          files: IPSelector-signed.ipa
+          prerelease: true
+```
