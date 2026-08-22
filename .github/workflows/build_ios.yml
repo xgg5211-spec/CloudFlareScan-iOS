@@ -308,8 +308,8 @@ jobs:
                                   .font(.caption)
                               if networkManager.availableCount > 0 {
                                   Text("✅\(networkManager.availableCount)")
-                                      .font(.caption)
-                                      .foregroundColor(.green)
+                                  .font(.caption)
+                                  .foregroundColor(.green)
                               }
                           }
                           .padding(.horizontal)
@@ -531,14 +531,28 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO
 
-      - name: Create Generic IPA (No Signing Required)
+      - name: Find and Package IPA
         run: |
-          # 直接从 .app 打包成 IPA（绕过签名验证）
+          # 查找 .app 文件
+          echo "查找 .app 文件..."
+          find . -name "*.app" -type d 2>/dev/null
+          
+          # 从 Archive 中提取 .app
+          APP_PATH=$(find build -name "*.app" -type d | head -1)
+          echo "找到 APP: $APP_PATH"
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ 未找到 .app 文件"
+            exit 1
+          fi
+          
+          # 打包成 IPA
           mkdir -p Payload
-          cp -R build/Release-iphoneos/CloudFlareScan.app Payload/
+          cp -R "$APP_PATH" Payload/
           zip -r CloudFlareScan.ipa Payload
           cp CloudFlareScan.ipa CloudFlareScan.tipa
-          ls -la
+          echo "✅ IPA 打包完成"
+          ls -la *.ipa *.tipa
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
