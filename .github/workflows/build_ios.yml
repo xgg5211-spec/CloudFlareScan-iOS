@@ -20,14 +20,17 @@ jobs:
           sudo xcode-select -switch /Applications/Xcode.app/Contents/Developer
           xcodebuild -version
 
-      - name: Create Objective-C Project
+      - name: Install xcodegen
         run: |
-          # 1. 用 xcodebuild 创建项目
-          mkdir -p CloudFlareScan
-          cd CloudFlareScan
+          brew install xcodegen
 
-          # 创建 Info.plist
-          cat > Info.plist << 'EOF'
+      - name: Create Project Files
+        run: |
+          mkdir -p CloudFlareScan
+          mkdir -p CloudFlareScan/Assets.xcassets/AppIcon.appiconset
+
+          # Info.plist
+          cat > CloudFlareScan/Info.plist << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -69,16 +72,13 @@ jobs:
           </plist>
           EOF
 
-          # 创建 Assets
-          mkdir -p Assets.xcassets/AppIcon.appiconset
-          cat > Assets.xcassets/Contents.json << 'EOF'
+          # Assets
+          cat > CloudFlareScan/Assets.xcassets/Contents.json << 'EOF'
           {"info":{"author":"xcode","version":1}}
           EOF
-          cat > Assets.xcassets/AppIcon.appiconset/Contents.json << 'EOF'
+          cat > CloudFlareScan/Assets.xcassets/AppIcon.appiconset/Contents.json << 'EOF'
           {"images":[{"idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"xcode","version":1}}
           EOF
-
-          cd ..
 
       - name: Create Source Files
         run: |
@@ -116,7 +116,7 @@ jobs:
           @end
           EOF
 
-          # ViewController.m
+          # ViewController.m - 完整功能
           cat > CloudFlareScan/ViewController.m << 'EOF'
           #import "ViewController.h"
 
@@ -154,6 +154,7 @@ jobs:
           @property (nonatomic, assign) NSInteger availableCount;
           @property (nonatomic, assign) double bestDelay;
           @property (nonatomic, assign) double avgDelay;
+          @property (nonatomic, strong) NSOperationQueue *scanQueue;
           @end
 
           @implementation ViewController
@@ -166,6 +167,8 @@ jobs:
               self.results = [NSMutableArray array];
               self.filteredResults = [NSMutableArray array];
               self.detectedISP = @"检测中...";
+              self.scanQueue = [[NSOperationQueue alloc] init];
+              self.scanQueue.maxConcurrentOperationCount = 150;
               [self setupUI];
               [self detectISP];
           }
@@ -222,7 +225,7 @@ jobs:
               self.countLabel.text = @"总数: 0  可用: 0";
               self.countLabel.textColor = [UIColor whiteColor];
               self.countLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-              self.countLabel.frame = CGRectMake(12, 32, 300, 22);
+              self.countLabel.frame = CGRectMake(12, 32, 350, 22);
               [statusView addSubview:self.countLabel];
 
               yOffset += 70;
@@ -800,55 +803,42 @@ jobs:
           @end
           EOF
 
-      - name: Generate Xcode Project
+      - name: Generate Xcode Project with xcodegen
         run: |
-          # 用 xcodebuild 生成项目文件
-          cd CloudFlareScan
-
-          # 创建空的 .xcodeproj
-          mkdir -p CloudFlareScan.xcodeproj
-
-          # 生成 project.pbxproj（使用 xcodebuild 方式）
-          cat > CloudFlareScan.xcodeproj/project.pbxproj << 'EOF'
-          // !$*UTF8*$!
-          {
-              archiveVersion = 1;
-              classes = {};
-              objectVersion = 56;
-              objects = {
-                  G100000001 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = G100000002 /* AppDelegate.m */; };
-                  G100000003 /* ViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = G100000004 /* ViewController.m */; };
-                  G100000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = G100000006 /* Assets.xcassets */; };
-                  G100000002 /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
-                  G100000003 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
-                  G100000004 /* ViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ViewController.m; sourceTree = "<group>"; };
-                  G100000005 /* ViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ViewController.h; sourceTree = "<group>"; };
-                  G100000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-                  G100000007 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-                  G100000008 /* CloudFlareScan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CloudFlareScan.app; sourceTree = BUILT_PRODUCTS_DIR; };
-                  G100000009 = {isa = PBXGroup; children = (G100000010, G100000011,); sourceTree = "<group>"; };
-                  G100000010 = {isa = PBXGroup; children = (G100000003, G100000002, G100000005, G100000004, G100000006, G100000007,); path = CloudFlareScan; sourceTree = "<group>"; };
-                  G100000011 = {isa = PBXGroup; children = (G100000008,); name = Products; sourceTree = "<group>"; };
-                  G100000012 /* CloudFlareScan */ = {isa = PBXNativeTarget; buildConfigurationList = G100000013; buildPhases = (G100000014, G100000015,); buildRules = (); dependencies = (); name = CloudFlareScan; productName = CloudFlareScan; productReference = G100000008; productType = "com.apple.product-type.application"; };
-                  G100000016 /* Project object */ = {isa = PBXProject; attributes = {LastSwiftUpdateCheck = 1500; LastUpgradeCheck = 1500; TargetAttributes = {G100000012 = {CreatedOnToolsVersion = 15.0;};};}; buildConfigurationList = G100000017; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base,); mainGroup = G100000009; productRefGroup = G100000011; projectDirPath = ""; projectRoot = ""; targets = (G100000012,); };
-                  G100000015 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (G100000005,); runOnlyForDeploymentPostprocessing = 0; };
-                  G100000014 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (G100000001, G100000003,); runOnlyForDeploymentPostprocessing = 0; };
-                  G100000018 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
-                  G100000019 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
-                  G100000020 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; INFOPLIST_FILE = CloudFlareScan/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
-                  G100000021 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; INFOPLIST_FILE = CloudFlareScan/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
-                  G100000013 = {isa = XCConfigurationList; buildConfigurations = (G100000020, G100000021,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-                  G100000017 = {isa = XCConfigurationList; buildConfigurations = (G100000018, G100000019,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-              };
-              rootObject = G100000016;
-          }
+          # 创建 project.yml 配置文件
+          cat > project.yml << 'EOF'
+          name: CloudFlareScan
+          targets:
+            CloudFlareScan:
+              type: application
+              platform: iOS
+              deploymentTarget: "15.0"
+              sources:
+                - CloudFlareScan
+              info:
+                path: CloudFlareScan/Info.plist
+                properties:
+                  UILaunchScreen: {}
+                  LSRequiresIPhoneOS: true
+                  UIRequiredDeviceCapabilities: [armv7]
+                  UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+                  NSAppTransportSecurity:
+                    NSAllowsArbitraryLoads: true
+              settings:
+                base:
+                  PRODUCT_BUNDLE_IDENTIFIER: com.cloudflarescan.ios
+                  CODE_SIGN_IDENTITY: ""
+                  CODE_SIGNING_REQUIRED: NO
+                  CODE_SIGNING_ALLOWED: NO
+                  DEVELOPMENT_TEAM: ""
           EOF
 
-          cd ..
+          # 使用 xcodegen 生成项目
+          xcodegen generate
 
       - name: Build App
         run: |
-          xcodebuild -project CloudFlareScan/CloudFlareScan.xcodeproj \
+          xcodebuild -project CloudFlareScan.xcodeproj \
             -scheme CloudFlareScan \
             -configuration Release \
             -derivedDataPath build \
