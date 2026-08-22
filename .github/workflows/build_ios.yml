@@ -2,8 +2,8 @@ name: Build IPSelector
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 4 * *'
+ schedule:
+    - cron: '0 4 * * *'
 
 permissions:
   contents: write
@@ -31,12 +31,10 @@ jobs:
         run: |
           cat > main.py << 'PYEOF'
           #!/usr/bin/env python3
-          import asyncio, socket, ssl, time, json, csv, sys, os, re, ipaddress
+          import asyncio, time, ipaddress
           from pathlib import Path
           from dataclasses import dataclass
-          from urllib.request import urlopen, Request
-          import yaml
-          import maxminddb
+          import yaml, maxminddb
           
           CITY_DB = Path("geoip/GeoLite2-City.mmdb")
           ASN_DB = Path("geoip/GeoLite2-ASN.mmdb")
@@ -53,7 +51,7 @@ jobs:
               tls_ms: int
               http_ms: int
               score: float
-              
+          
           def geo(ip):
               c = r = isp = ""
               try:
@@ -77,7 +75,7 @@ jobs:
                   _, w = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=3)
                   w.close()
                   await w.wait_closed()
-                  return int((time.perf_counter() - s) * 1000)
+                  return int((time.perf_counter() - s) * 100)
               except:
                   return 9999
           
@@ -185,7 +183,7 @@ jobs:
                               Text("\(node.ip):\(node.port)").font(.caption).foregroundStyle(.gray)
                           }
                           Spacer()
-                          Text(node.country + " + node.isp).foregroundStyle(.cyan)
+                          Text(node.country + " " + node.isp).foregroundStyle(.cyan)
                           Text("\(node.latency)ms").foregroundStyle(node.latency < 200 ? .green : .orange)
                           Button { UIPasteboard.general.string = "\(node.ip):\(node.port)" } label: {
                               Image(systemName: "square.on.square").foregroundStyle(.cyan)
