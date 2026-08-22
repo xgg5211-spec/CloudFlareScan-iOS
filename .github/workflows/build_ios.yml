@@ -22,12 +22,12 @@ jobs:
 
       - name: Create Objective-C Project
         run: |
+          # 1. 用 xcodebuild 创建项目
           mkdir -p CloudFlareScan
-          mkdir -p CloudFlareScan.xcodeproj
-          mkdir -p CloudFlareScan/Assets.xcassets/AppIcon.appiconset
+          cd CloudFlareScan
 
-          # Info.plist
-          cat > CloudFlareScan/Info.plist << 'EOF'
+          # 创建 Info.plist
+          cat > Info.plist << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -69,15 +69,18 @@ jobs:
           </plist>
           EOF
 
-          # Assets
-          cat > CloudFlareScan/Assets.xcassets/Contents.json << 'EOF'
+          # 创建 Assets
+          mkdir -p Assets.xcassets/AppIcon.appiconset
+          cat > Assets.xcassets/Contents.json << 'EOF'
           {"info":{"author":"xcode","version":1}}
           EOF
-          cat > CloudFlareScan/Assets.xcassets/AppIcon.appiconset/Contents.json << 'EOF'
+          cat > Assets.xcassets/AppIcon.appiconset/Contents.json << 'EOF'
           {"images":[{"idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"xcode","version":1}}
           EOF
 
-      - name: Create Objective-C Source Files
+          cd ..
+
+      - name: Create Source Files
         run: |
           # AppDelegate.h
           cat > CloudFlareScan/AppDelegate.h << 'EOF'
@@ -113,11 +116,10 @@ jobs:
           @end
           EOF
 
-          # ViewController.m - 完整功能
+          # ViewController.m
           cat > CloudFlareScan/ViewController.m << 'EOF'
           #import "ViewController.h"
 
-          // ========== IP数据模型 ==========
           @interface IPInfo : NSObject
           @property (nonatomic, strong) NSString *ip;
           @property (nonatomic, assign) NSInteger port;
@@ -131,12 +133,10 @@ jobs:
           @implementation IPInfo
           @end
 
-          // ========== 主控制器 ==========
           @interface ViewController ()
           @property (nonatomic, strong) NSMutableArray<IPInfo *> *ipList;
           @property (nonatomic, strong) NSMutableArray<IPInfo *> *results;
           @property (nonatomic, strong) NSMutableArray<IPInfo *> *filteredResults;
-
           @property (nonatomic, strong) UITextView *inputTextView;
           @property (nonatomic, strong) UITextField *portField;
           @property (nonatomic, strong) UITextField *timeoutField;
@@ -144,20 +144,16 @@ jobs:
           @property (nonatomic, strong) UITextField *filterPortField;
           @property (nonatomic, strong) UITableView *tableView;
           @property (nonatomic, strong) UITextView *outputTextView;
-
           @property (nonatomic, strong) UIButton *scanButton;
           @property (nonatomic, strong) UIButton *stopButton;
           @property (nonatomic, strong) UILabel *statusLabel;
           @property (nonatomic, strong) UILabel *ispLabel;
           @property (nonatomic, strong) UILabel *countLabel;
-
           @property (nonatomic, assign) BOOL isScanning;
           @property (nonatomic, strong) NSString *detectedISP;
           @property (nonatomic, assign) NSInteger availableCount;
           @property (nonatomic, assign) double bestDelay;
           @property (nonatomic, assign) double avgDelay;
-
-          @property (nonatomic, strong) NSOperationQueue *scanQueue;
           @end
 
           @implementation ViewController
@@ -166,19 +162,14 @@ jobs:
               [super viewDidLoad];
               self.view.backgroundColor = [UIColor colorWithRed:0.06 green:0.08 blue:0.15 alpha:1];
               self.title = @"🚀 优选IP筛选工具";
-
               self.ipList = [NSMutableArray array];
               self.results = [NSMutableArray array];
               self.filteredResults = [NSMutableArray array];
               self.detectedISP = @"检测中...";
-              self.scanQueue = [[NSOperationQueue alloc] init];
-              self.scanQueue.maxConcurrentOperationCount = 150;
-
               [self setupUI];
               [self detectISP];
           }
 
-          // ========== UI布局 ==========
           - (void)setupUI {
               UIScrollView *scrollView = [[UIScrollView alloc] init];
               scrollView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -205,11 +196,12 @@ jobs:
 
               CGFloat padding = 12;
               CGFloat yOffset = 10;
+              CGFloat width = self.view.bounds.size.width - padding * 2;
 
-              // ===== 状态栏 =====
+              // 状态栏
               UIView *statusView = [self createCardView];
               [contentView addSubview:statusView];
-              statusView.frame = CGRectMake(padding, yOffset, self.view.bounds.size.width - padding * 2, 60);
+              statusView.frame = CGRectMake(padding, yOffset, width, 60);
 
               self.ispLabel = [[UILabel alloc] init];
               self.ispLabel.text = [NSString stringWithFormat:@"📍 %@", self.detectedISP];
@@ -229,16 +221,16 @@ jobs:
               self.countLabel = [[UILabel alloc] init];
               self.countLabel.text = @"总数: 0  可用: 0";
               self.countLabel.textColor = [UIColor whiteColor];
-              self.countLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+              self.countLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
               self.countLabel.frame = CGRectMake(12, 32, 300, 22);
               [statusView addSubview:self.countLabel];
 
               yOffset += 70;
 
-              // ===== 1. 导入区域 =====
+              // 导入
               UIView *importView = [self createCardView];
               [contentView addSubview:importView];
-              importView.frame = CGRectMake(padding, yOffset, self.view.bounds.size.width - padding * 2, 160);
+              importView.frame = CGRectMake(padding, yOffset, width, 160);
 
               UILabel *importLabel = [self createSectionLabel:@"📂 导入IP"];
               importLabel.frame = CGRectMake(12, 8, 200, 22);
@@ -256,28 +248,26 @@ jobs:
 
               self.inputTextView = [[UITextView alloc] init];
               self.inputTextView.backgroundColor = [UIColor colorWithRed:0.06 green:0.08 blue:0.15 alpha:1];
-              self.inputTextView.textColor = [UIColor whiteColor];
+              self.inputTextView.textColor = [UIColor grayColor];
               self.inputTextView.font = [UIFont systemFontOfSize:12];
               self.inputTextView.layer.cornerRadius = 6;
               self.inputTextView.layer.borderWidth = 0.5;
               self.inputTextView.layer.borderColor = [UIColor colorWithRed:0.15 green:0.25 blue:0.4 alpha:1].CGColor;
               self.inputTextView.text = @"每行一个IP，支持 1.1.1.1 或 1.1.1.1:443";
-              self.inputTextView.textColor = [UIColor grayColor];
               self.inputTextView.frame = CGRectMake(12, 80, importView.bounds.size.width - 24, 68);
               [importView addSubview:self.inputTextView];
 
               yOffset += 170;
 
-              // ===== 2. 设置区域 =====
+              // 设置
               UIView *settingView = [self createCardView];
               [contentView addSubview:settingView];
-              settingView.frame = CGRectMake(padding, yOffset, self.view.bounds.size.width - padding * 2, 120);
+              settingView.frame = CGRectMake(padding, yOffset, width, 120);
 
               UILabel *settingLabel = [self createSectionLabel:@"⚙️ 扫描设置"];
               settingLabel.frame = CGRectMake(12, 8, 200, 22);
               [settingView addSubview:settingLabel];
 
-              // 端口
               UILabel *portLabel = [[UILabel alloc] init];
               portLabel.text = @"端口:";
               portLabel.textColor = [UIColor grayColor];
@@ -293,17 +283,16 @@ jobs:
               self.portField.layer.cornerRadius = 4;
               self.portField.layer.borderWidth = 0.5;
               self.portField.layer.borderColor = [UIColor colorWithRed:0.15 green:0.25 blue:0.4 alpha:1].CGColor;
-              self.portField.frame = CGRectMake(60, 38, 130, 30);
+              self.portField.frame = CGRectMake(55, 38, 130, 30);
               self.portField.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 8, 30)];
               self.portField.leftViewMode = UITextFieldViewModeAlways;
               [settingView addSubview:self.portField];
 
-              // 超时
               UILabel *timeoutLabel = [[UILabel alloc] init];
               timeoutLabel.text = @"超时:";
               timeoutLabel.textColor = [UIColor grayColor];
               timeoutLabel.font = [UIFont systemFontOfSize:12];
-              timeoutLabel.frame = CGRectMake(210, 38, 40, 30);
+              timeoutLabel.frame = CGRectMake(200, 38, 40, 30);
               [settingView addSubview:timeoutLabel];
 
               self.timeoutField = [[UITextField alloc] init];
@@ -314,7 +303,7 @@ jobs:
               self.timeoutField.layer.cornerRadius = 4;
               self.timeoutField.layer.borderWidth = 0.5;
               self.timeoutField.layer.borderColor = [UIColor colorWithRed:0.15 green:0.25 blue:0.4 alpha:1].CGColor;
-              self.timeoutField.frame = CGRectMake(258, 38, 50, 30);
+              self.timeoutField.frame = CGRectMake(245, 38, 50, 30);
               self.timeoutField.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 8, 30)];
               self.timeoutField.leftViewMode = UITextFieldViewModeAlways;
               [settingView addSubview:self.timeoutField];
@@ -323,16 +312,15 @@ jobs:
               secLabel.text = @"秒";
               secLabel.textColor = [UIColor grayColor];
               secLabel.font = [UIFont systemFontOfSize:12];
-              secLabel.frame = CGRectMake(312, 38, 20, 30);
+              secLabel.frame = CGRectMake(300, 38, 20, 30);
               [settingView addSubview:secLabel];
 
-              // 运营商显示
-              UILabel *ispLabel = [[UILabel alloc] init];
-              ispLabel.text = @"运营商:";
-              ispLabel.textColor = [UIColor grayColor];
-              ispLabel.font = [UIFont systemFontOfSize:12];
-              ispLabel.frame = CGRectMake(12, 74, 55, 30);
-              [settingView addSubview:ispLabel];
+              UILabel *ispLabel2 = [[UILabel alloc] init];
+              ispLabel2.text = @"运营商:";
+              ispLabel2.textColor = [UIColor grayColor];
+              ispLabel2.font = [UIFont systemFontOfSize:12];
+              ispLabel2.frame = CGRectMake(12, 74, 55, 30);
+              [settingView addSubview:ispLabel2];
 
               UILabel *ispValue = [[UILabel alloc] init];
               ispValue.text = self.detectedISP;
@@ -344,10 +332,10 @@ jobs:
 
               yOffset += 130;
 
-              // ===== 3. 操作按钮 =====
+              // 操作按钮
               UIView *actionView = [self createCardView];
               [contentView addSubview:actionView];
-              actionView.frame = CGRectMake(padding, yOffset, self.view.bounds.size.width - padding * 2, 60);
+              actionView.frame = CGRectMake(padding, yOffset, width, 60);
 
               self.scanButton = [self createButton:@"▶ 开始扫描" color:[UIColor colorWithRed:0 green:0.48 blue:0.9 alpha:1]];
               self.scanButton.frame = CGRectMake(12, 12, 120, 36);
@@ -360,7 +348,6 @@ jobs:
               self.stopButton.enabled = NO;
               [actionView addSubview:self.stopButton];
 
-              // 复制按钮
               UIButton *copyBtn = [self createButton:@"📋 复制" color:[UIColor colorWithRed:0.5 green:0 blue:0.9 alpha:1]];
               copyBtn.frame = CGRectMake(actionView.bounds.size.width - 180, 12, 80, 36);
               [copyBtn addTarget:self action:@selector(copyResults) forControlEvents:UIControlEventTouchUpInside];
@@ -373,10 +360,10 @@ jobs:
 
               yOffset += 70;
 
-              // ===== 4. 筛选 =====
+              // 筛选
               UIView *filterView = [self createCardView];
               [contentView addSubview:filterView];
-              filterView.frame = CGRectMake(padding, yOffset, self.view.bounds.size.width - padding * 2, 70);
+              filterView.frame = CGRectMake(padding, yOffset, width, 70);
 
               UILabel *filterLabel = [self createSectionLabel:@"🔍 筛选"];
               filterLabel.frame = CGRectMake(12, 8, 100, 22);
@@ -420,10 +407,10 @@ jobs:
 
               yOffset += 80;
 
-              // ===== 5. 结果列表 =====
+              // 结果列表
               UIView *resultView = [self createCardView];
               [contentView addSubview:resultView];
-              resultView.frame = CGRectMake(padding, yOffset, self.view.bounds.size.width - padding * 2, 200);
+              resultView.frame = CGRectMake(padding, yOffset, width, 200);
 
               UILabel *resultLabel = [self createSectionLabel:@"📋 可用IP"];
               resultLabel.frame = CGRectMake(12, 8, 200, 22);
@@ -440,10 +427,10 @@ jobs:
 
               yOffset += 210;
 
-              // ===== 6. 输出文本 =====
+              // 输出
               UIView *outputView = [self createCardView];
               [contentView addSubview:outputView];
-              outputView.frame = CGRectMake(padding, yOffset, self.view.bounds.size.width - padding * 2, 140);
+              outputView.frame = CGRectMake(padding, yOffset, width, 140);
 
               UILabel *outputLabel = [self createSectionLabel:@"📝 输出文本"];
               outputLabel.frame = CGRectMake(12, 8, 200, 22);
@@ -471,12 +458,10 @@ jobs:
               [outputView addSubview:exportBtn];
 
               yOffset += 160;
-
               contentView.frame = CGRectMake(0, 0, self.view.bounds.size.width, yOffset + 20);
               scrollView.contentSize = contentView.frame.size;
           }
 
-          // ========== 辅助方法 ==========
           - (UIView *)createCardView {
               UIView *view = [[UIView alloc] init];
               view.backgroundColor = [UIColor colorWithRed:0.10 green:0.13 blue:0.22 alpha:1];
@@ -506,7 +491,6 @@ jobs:
               return btn;
           }
 
-          // ========== 检测运营商 ==========
           - (void)detectISP {
               NSURL *url = [NSURL URLWithString:@"http://ip-api.com/json/?fields=isp"];
               NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
@@ -525,7 +509,6 @@ jobs:
               [task resume];
           }
 
-          // ========== 粘贴导入 ==========
           - (void)showPasteAlert {
               UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"📋 粘贴导入" message:@"每行一个IP" preferredStyle:UIAlertControllerStyleAlert];
               [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
@@ -548,7 +531,6 @@ jobs:
               for (NSString *line in lines) {
                   NSString *trimmed = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
                   if (trimmed.length == 0) continue;
-
                   NSArray *parts = [trimmed componentsSeparatedByString:@":"];
                   NSString *ip = parts.firstObject;
                   NSInteger port = 443;
@@ -556,7 +538,6 @@ jobs:
                       port = [parts[1] integerValue];
                       if (port == 0) port = 443;
                   }
-
                   if ([ip containsString:@"."] || [ip containsString:@":"]) {
                       IPInfo *info = [[IPInfo alloc] init];
                       info.ip = ip;
@@ -565,7 +546,6 @@ jobs:
                       [self.ipList addObject:info];
                   }
               }
-
               self.inputTextView.text = [NSString stringWithFormat:@"✅ 已导入 %lu 个IP", (unsigned long)self.ipList.count];
               self.inputTextView.textColor = [UIColor colorWithRed:0 green:0.9 blue:0.5 alpha:1];
               [self updateUI];
@@ -581,7 +561,6 @@ jobs:
               [self updateUI];
           }
 
-          // ========== 扫描 ==========
           - (void)startScan {
               if (self.ipList.count == 0) {
                   [self showAlert:@"请先导入IP列表"];
@@ -592,7 +571,6 @@ jobs:
               self.scanButton.enabled = NO;
               self.stopButton.enabled = YES;
               self.statusLabel.text = @"扫描中...";
-
               [self.results removeAllObjects];
               [self.filteredResults removeAllObjects];
               self.availableCount = 0;
@@ -616,10 +594,8 @@ jobs:
                       for (NSString *portStr in ports) {
                           NSInteger port = [portStr integerValue];
                           if (port == 0) continue;
-
                           dispatch_group_enter(group);
                           dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
-
                           dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
                               [self checkIP:ipInfo port:port timeout:timeout completion:^(IPInfo *result) {
                                   [lock lock];
@@ -630,16 +606,12 @@ jobs:
                                   [lock unlock];
                                   dispatch_semaphore_signal(semaphore);
                                   dispatch_group_leave(group);
-
                                   dispatch_async(dispatch_get_main_queue(), ^{
                                       self.results = [allResults mutableCopy];
                                       self.availableCount = self.results.count;
-
                                       NSMutableArray *delays = [NSMutableArray array];
                                       for (IPInfo *info in self.results) {
-                                          if (info.delay > 0) {
-                                              [delays addObject:@(info.delay)];
-                                          }
+                                          if (info.delay > 0) [delays addObject:@(info.delay)];
                                       }
                                       if (delays.count > 0) {
                                           [delays sortUsingComparator:^NSComparisonResult(NSNumber *a, NSNumber *b) {
@@ -647,9 +619,7 @@ jobs:
                                           }];
                                           self.bestDelay = [delays.firstObject doubleValue];
                                           double sum = 0;
-                                          for (NSNumber *d in delays) {
-                                              sum += [d doubleValue];
-                                          }
+                                          for (NSNumber *d in delays) { sum += [d doubleValue]; }
                                           self.avgDelay = sum / delays.count;
                                       }
                                       [self applyFilter];
@@ -675,7 +645,6 @@ jobs:
               NSString *urlString = [NSString stringWithFormat:@"https://%@:%ld/cdn-cgi/trace", ipInfo.ip, (long)port];
               NSURL *url = [NSURL URLWithString:urlString];
               NSDate *start = [NSDate date];
-
               NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
               config.timeoutIntervalForRequest = timeout;
               config.timeoutIntervalForResource = timeout;
@@ -694,15 +663,12 @@ jobs:
                                   break;
                               }
                           }
-
                           IPInfo *result = [[IPInfo alloc] init];
                           result.ip = ipInfo.ip;
                           result.port = port;
                           result.delay = delay;
                           result.colo = colo;
                           result.isAvailable = YES;
-
-                          // 获取地区
                           [self getLocation:ipInfo.ip completion:^(NSString *country, NSString *isp) {
                               result.country = country ?: @"";
                               result.isp = isp ?: @"";
@@ -719,7 +685,6 @@ jobs:
           - (void)getLocation:(NSString *)ip completion:(void(^)(NSString *, NSString *))completion {
               NSString *urlString = [NSString stringWithFormat:@"http://ip-api.com/json/%@?fields=status,country,isp", ip];
               NSURL *url = [NSURL URLWithString:urlString];
-
               NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
                   if (data) {
                       NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
@@ -738,10 +703,8 @@ jobs:
               self.scanButton.enabled = YES;
               self.stopButton.enabled = NO;
               self.statusLabel.text = @"⏹ 已停止";
-              [self.scanQueue cancelAllOperations];
           }
 
-          // ========== 筛选 ==========
           - (void)filterChanged {
               [self applyFilter];
           }
@@ -749,35 +712,19 @@ jobs:
           - (void)applyFilter {
               NSString *countryFilter = self.filterCountryField.text;
               NSString *portFilter = self.filterPortField.text;
-
               NSMutableArray *filtered = [NSMutableArray array];
               for (IPInfo *info in self.results) {
                   BOOL match = YES;
-                  if (countryFilter.length > 0) {
-                      if (![info.country localizedCaseInsensitiveContainsString:countryFilter]) {
-                          match = NO;
-                      }
-                  }
-                  if (portFilter.length > 0) {
-                      NSInteger port = [portFilter integerValue];
-                      if (info.port != port) {
-                          match = NO;
-                      }
-                  }
-                  if (match) {
-                      [filtered addObject:info];
-                  }
+                  if (countryFilter.length > 0 && ![info.country localizedCaseInsensitiveContainsString:countryFilter]) match = NO;
+                  if (portFilter.length > 0 && info.port != [portFilter integerValue]) match = NO;
+                  if (match) [filtered addObject:info];
               }
               self.filteredResults = filtered;
               [self.tableView reloadData];
-
               UILabel *filterCount = [self.view viewWithTag:200];
-              if (filterCount) {
-                  filterCount.text = [NSString stringWithFormat:@"显示 %lu 个", (unsigned long)self.filteredResults.count];
-              }
+              if (filterCount) filterCount.text = [NSString stringWithFormat:@"显示 %lu 个", (unsigned long)self.filteredResults.count];
           }
 
-          // ========== 复制 ==========
           - (void)copyResults {
               NSMutableString *text = [NSMutableString string];
               for (IPInfo *info in self.filteredResults) {
@@ -816,7 +763,6 @@ jobs:
               return text.length > 0 ? text : @"暂无数据";
           }
 
-          // ========== UI更新 ==========
           - (void)updateUI {
               self.countLabel.text = [NSString stringWithFormat:@"总数: %lu  可用: %lu  最佳: %.0fms  平均: %.0fms",
                                       (unsigned long)self.ipList.count,
@@ -826,7 +772,6 @@ jobs:
               [self.tableView reloadData];
           }
 
-          // ========== TableView ==========
           - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
               return self.filteredResults.count;
           }
@@ -836,12 +781,7 @@ jobs:
               cell.backgroundColor = [UIColor clearColor];
               cell.textLabel.textColor = [UIColor whiteColor];
               cell.textLabel.font = [UIFont systemFontOfSize:12];
-
               IPInfo *info = self.filteredResults[indexPath.row];
-              UIColor *delayColor = [UIColor greenColor];
-              if (info.delay > 100) delayColor = [UIColor orangeColor];
-              if (info.delay > 200) delayColor = [UIColor redColor];
-
               cell.textLabel.text = [NSString stringWithFormat:@"%@:%ld  [%.0fms]  %@  %@",
                                      info.ip, (long)info.port, info.delay, info.country, info.colo];
               return cell;
@@ -851,7 +791,6 @@ jobs:
               return 28;
           }
 
-          // ========== 提示框 ==========
           - (void)showAlert:(NSString *)message {
               UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"提示" message:message preferredStyle:UIAlertControllerStyleAlert];
               [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil]];
@@ -861,8 +800,15 @@ jobs:
           @end
           EOF
 
-      - name: Create Xcode Project File
+      - name: Generate Xcode Project
         run: |
+          # 用 xcodebuild 生成项目文件
+          cd CloudFlareScan
+
+          # 创建空的 .xcodeproj
+          mkdir -p CloudFlareScan.xcodeproj
+
+          # 生成 project.pbxproj（使用 xcodebuild 方式）
           cat > CloudFlareScan.xcodeproj/project.pbxproj << 'EOF'
           // !$*UTF8*$!
           {
@@ -870,63 +816,39 @@ jobs:
               classes = {};
               objectVersion = 56;
               objects = {
-                  /* Begin PBXBuildFile section */
-                  F100000001 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = F100000002 /* AppDelegate.m */; };
-                  F100000003 /* ViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = F100000004 /* ViewController.m */; };
-                  F100000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F100000006 /* Assets.xcassets */; };
-                  /* End PBXBuildFile section */
-
-                  /* Begin PBXFileReference section */
-                  F100000002 /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
-                  F100000003 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
-                  F100000004 /* ViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ViewController.m; sourceTree = "<group>"; };
-                  F100000005 /* ViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ViewController.h; sourceTree = "<group>"; };
-                  F100000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-                  F100000007 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-                  F100000008 /* CloudFlareScan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CloudFlareScan.app; sourceTree = BUILT_PRODUCTS_DIR; };
-                  /* End PBXFileReference section */
-
-                  /* Begin PBXGroup section */
-                  F100000009 = {isa = PBXGroup; children = (F100000010, F100000011,); sourceTree = "<group>"; };
-                  F100000010 /* CloudFlareScan */ = {isa = PBXGroup; children = (F100000003, F100000002, F100000005, F100000004, F100000006, F100000007,); path = CloudFlareScan; sourceTree = "<group>"; };
-                  F100000011 /* Products */ = {isa = PBXGroup; children = (F100000008,); name = Products; sourceTree = "<group>"; };
-                  /* End PBXGroup section */
-
-                  /* Begin PBXNativeTarget section */
-                  F100000012 /* CloudFlareScan */ = {isa = PBXNativeTarget; buildConfigurationList = F100000013; buildPhases = (F100000014, F100000015,); buildRules = (); dependencies = (); name = CloudFlareScan; productName = CloudFlareScan; productReference = F100000008; productType = "com.apple.product-type.application"; };
-                  /* End PBXNativeTarget section */
-
-                  /* Begin PBXProject section */
-                  F100000016 /* Project object */ = {isa = PBXProject; attributes = {LastSwiftUpdateCheck = 1500; LastUpgradeCheck = 1500; TargetAttributes = {F100000012 = {CreatedOnToolsVersion = 15.0;};};}; buildConfigurationList = F100000017; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base,); mainGroup = F100000009; productRefGroup = F100000011; projectDirPath = ""; projectRoot = ""; targets = (F100000012,); };
-                  /* End PBXProject section */
-
-                  /* Begin PBXResourcesBuildPhase section */
-                  F100000015 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (F100000005,); runOnlyForDeploymentPostprocessing = 0; };
-                  /* End PBXResourcesBuildPhase section */
-
-                  /* Begin PBXSourcesBuildPhase section */
-                  F100000014 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (F100000001, F100000003,); runOnlyForDeploymentPostprocessing = 0; };
-                  /* End PBXSourcesBuildPhase section */
-
-                  /* Begin XCBuildConfiguration section */
-                  F100000018 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
-                  F100000019 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
-                  F100000020 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; INFOPLIST_FILE = CloudFlareScan/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
-                  F100000021 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; INFOPLIST_FILE = CloudFlareScan/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
-                  /* End XCBuildConfiguration section */
-
-                  /* Begin XCConfigurationList section */
-                  F100000013 = {isa = XCConfigurationList; buildConfigurations = (F100000020, F100000021,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-                  F100000017 = {isa = XCConfigurationList; buildConfigurations = (F100000018, F100000019,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-                  /* End XCConfigurationList section */
+                  G100000001 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = G100000002 /* AppDelegate.m */; };
+                  G100000003 /* ViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = G100000004 /* ViewController.m */; };
+                  G100000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = G100000006 /* Assets.xcassets */; };
+                  G100000002 /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
+                  G100000003 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
+                  G100000004 /* ViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ViewController.m; sourceTree = "<group>"; };
+                  G100000005 /* ViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ViewController.h; sourceTree = "<group>"; };
+                  G100000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+                  G100000007 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+                  G100000008 /* CloudFlareScan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CloudFlareScan.app; sourceTree = BUILT_PRODUCTS_DIR; };
+                  G100000009 = {isa = PBXGroup; children = (G100000010, G100000011,); sourceTree = "<group>"; };
+                  G100000010 = {isa = PBXGroup; children = (G100000003, G100000002, G100000005, G100000004, G100000006, G100000007,); path = CloudFlareScan; sourceTree = "<group>"; };
+                  G100000011 = {isa = PBXGroup; children = (G100000008,); name = Products; sourceTree = "<group>"; };
+                  G100000012 /* CloudFlareScan */ = {isa = PBXNativeTarget; buildConfigurationList = G100000013; buildPhases = (G100000014, G100000015,); buildRules = (); dependencies = (); name = CloudFlareScan; productName = CloudFlareScan; productReference = G100000008; productType = "com.apple.product-type.application"; };
+                  G100000016 /* Project object */ = {isa = PBXProject; attributes = {LastSwiftUpdateCheck = 1500; LastUpgradeCheck = 1500; TargetAttributes = {G100000012 = {CreatedOnToolsVersion = 15.0;};};}; buildConfigurationList = G100000017; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base,); mainGroup = G100000009; productRefGroup = G100000011; projectDirPath = ""; projectRoot = ""; targets = (G100000012,); };
+                  G100000015 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (G100000005,); runOnlyForDeploymentPostprocessing = 0; };
+                  G100000014 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (G100000001, G100000003,); runOnlyForDeploymentPostprocessing = 0; };
+                  G100000018 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
+                  G100000019 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
+                  G100000020 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; INFOPLIST_FILE = CloudFlareScan/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
+                  G100000021 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; INFOPLIST_FILE = CloudFlareScan/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
+                  G100000013 = {isa = XCConfigurationList; buildConfigurations = (G100000020, G100000021,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+                  G100000017 = {isa = XCConfigurationList; buildConfigurations = (G100000018, G100000019,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
               };
-              rootObject = F100000016;
+              rootObject = G100000016;
           }
           EOF
 
+          cd ..
+
       - name: Build App
         run: |
-          xcodebuild -project CloudFlareScan.xcodeproj \
+          xcodebuild -project CloudFlareScan/CloudFlareScan.xcodeproj \
             -scheme CloudFlareScan \
             -configuration Release \
             -derivedDataPath build \
@@ -934,8 +856,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            ONLY_ACTIVE_ARCH=NO \
-            -quiet
+            ONLY_ACTIVE_ARCH=NO
 
       - name: Package IPA
         run: |
