@@ -2,12 +2,6 @@ name: Build iOS IPA for TrollStore
 
 on:
   workflow_dispatch:
-    inputs:
-      custom_ips:
-        description: '自定义IP列表（每行一个，留空则自动生成）'
-        required: false
-        default: ''
-        type: string
   push:
     branches: [ main, master ]
 
@@ -26,13 +20,12 @@ jobs:
           sudo xcode-select -switch /Applications/Xcode.app/Contents/Developer
           xcodebuild -version
 
-      - name: Create Xcode Project
+      - name: Create Project
         run: |
           mkdir -p CloudFlareScan
           mkdir -p CloudFlareScan.xcodeproj
           mkdir -p CloudFlareScan/Assets.xcassets/AppIcon.appiconset
 
-          # ========== Info.plist ==========
           cat > CloudFlareScan/Info.plist << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -75,7 +68,6 @@ jobs:
           </plist>
           EOF
 
-          # ========== AppDelegate.swift ==========
           cat > CloudFlareScan/AppDelegate.swift << 'EOF'
           import UIKit
           import SwiftUI
@@ -83,7 +75,6 @@ jobs:
           @main
           class AppDelegate: UIResponder, UIApplicationDelegate {
               var window: UIWindow?
-
               func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
                   let window = UIWindow(frame: UIScreen.main.bounds)
                   window.rootViewController = UIHostingController(rootView: ContentView())
@@ -94,605 +85,417 @@ jobs:
           }
           EOF
 
-          # ========== ContentView.swift（简化稳定版） ==========
           cat > CloudFlareScan/ContentView.swift << 'EOF'
           import SwiftUI
-          import UniformTypeIdentifiers
 
-          // MARK: - 数据模型
           struct IPInfo: Identifiable {
               let id = UUID()
-              var ip: String
-              var port: Int
+              var ip: String = ""
+              var port: Int = 443
               var delay: Double = -1
               var country: String = ""
-              var city: String = ""
               var isp: String = ""
               var colo: String = ""
-              var region: String = ""
               var isAvailable: Bool = false
-
-              var displayText: String {
-                  "\(ip):\(port)  [\(String(format: "%.0f", delay))ms] \(country) \(colo)"
-              }
-
-              var qualityText: String {
-                  let d = delay
-                  if d > 0 && d < 30 { return "极速" }
-                  if d < 60 { return "优秀" }
-                  if d < 100 { return "良好" }
-                  if d < 200 { return "一般" }
-                  return "较慢"
-              }
-
-              var qualityColor: Color {
-                  let d = delay
-                  if d > 0 && d < 30 { return .purple }
-                  if d < 60 { return .green }
-                  if d < 100 { return .blue }
-                  if d < 200 { return .orange }
-                  return .red
-              }
           }
 
-          // MARK: - 常量
-          let regionList = ["全部地区", "东亚", "东南亚", "欧洲", "北美", "南美", "非洲", "大洋洲", "中国", "美国", "日本", "韩国", "新加坡", "德国", "英国", "法国"]
-          let ispOptions = ["自动识别", "联通", "电信", "移动", "广电", "其他"]
-
-          // MARK: - 主视图
-          struct ContentView: View {
-              @StateObject private var vm = ScanViewModel()
-
-              var body: some View {
-                  ZStack {
-                      Color(red: 0.06, green: 0.08, blue: 0.15).ignoresSafeArea()
-
-                      ScrollView {
-                          VStack(spacing: 12) {
-                              // 标题
-                              HStack {
-                                  VStack(alignment: .leading, spacing: 2) {
-                                      Text("🚀 优选IP筛选工具").font(.title3).fontWeight(.bold).foregroundColor(.white)
-                                      Text("CloudFlare 智能优选 · 极速扫描").font(.caption2).foregroundColor(.gray)
-                                  }
-                                  Spacer()
-                                  if vm.isScanning { ProgressView().scaleEffect(0.7) }
-                              }
-                              .padding(.horizontal, 14)
-                              .padding(.top, 8)
-
-                              // 状态概览
-                              HStack(spacing: 8) {
-                                  VStack { Text("总数").font(.caption2).foregroundColor(.gray); Text("\(vm.ipList.count)").font(.subheadline).fontWeight(.semibold).foregroundColor(.white) }.frame(maxWidth: .infinity)
-                                  VStack { Text("可用").font(.caption2).foregroundColor(.gray); Text("\(vm.availableCount)").font(.subheadline).fontWeight(.semibold).foregroundColor(.green) }.frame(maxWidth: .infinity)
-                                  VStack { Text("最佳").font(.caption2).foregroundColor(.gray); Text(vm.minDelay > 0 ? String(format: "%.0fms", vm.minDelay) : "--").font(.subheadline).fontWeight(.semibold).foregroundColor(.orange) }.frame(maxWidth: .infinity)
-                                  VStack { Text("平均").font(.caption2).foregroundColor(.gray); Text(vm.avgDelay > 0 ? String(format: "%.0fms", vm.avgDelay) : "--").font(.subheadline).fontWeight(.semibold).foregroundColor(.blue) }.frame(maxWidth: .infinity)
-                              }
-                              .padding(10)
-                              .background(Color(red: 0.10, green: 0.13, blue: 0.22))
-                              .cornerRadius(10)
-
-                              // 1. 选择文件
-                              VStack(alignment: .leading, spacing: 8) {
-                                  Text("📂 选择文件").font(.headline).foregroundColor(.white)
-                                  HStack(spacing: 10) {
-                                      Button { vm.showingFileImporter = true } label: {
-                                          Label("文件夹导入", systemImage: "folder").font(.caption).padding(.horizontal, 12).padding(.vertical, 6).background(Color.blue.opacity(0.15)).foregroundColor(.blue).cornerRadius(6)
-                                      }
-                                      .fileImporter(isPresented: $vm.showingFileImporter, allowedContentTypes: [.plainText, .text]) { result in
-                                          vm.importFile(result: result)
-                                      }
-
-                                      Button { vm.showingPasteSheet = true } label: {
-                                          Label("粘贴导入", systemImage: "doc.on.clipboard").font(.caption).padding(.horizontal, 12).padding(.vertical, 6).background(Color.green.opacity(0.15)).foregroundColor(.green).cornerRadius(6)
-                                      }
-                                      .sheet(isPresented: $vm.showingPasteSheet) {
-                                          PasteImportView(vm: vm)
-                                      }
-
-                                      Spacer()
-                                      Text(vm.ipSourceText.isEmpty ? "尚未导入文件" : vm.ipSourceText).font(.caption).foregroundColor(vm.ipSourceText.isEmpty ? .gray : .green)
-                                  }
-                              }
-                              .padding(12)
-                              .background(Color(red: 0.10, green: 0.13, blue: 0.22))
-                              .cornerRadius(10)
-
-                              // 2. 扫描设置
-                              VStack(alignment: .leading, spacing: 8) {
-                                  Text("⚙️ 扫描设置").font(.headline).foregroundColor(.white)
-
-                                  HStack {
-                                      Text("扫描数量").font(.caption).foregroundColor(.gray)
-                                      TextField("留空=全部", text: $vm.scanCount).textFieldStyle(PlainTextFieldStyle()).font(.caption).foregroundColor(.white).frame(width: 80).padding(.horizontal, 6).padding(.vertical, 3).background(Color(red: 0.06, green: 0.08, blue: 0.15)).cornerRadius(4)
-                                      Spacer()
-                                      Text("端口筛选").font(.caption).foregroundColor(.gray)
-                                      TextField("443,2053,8443", text: $vm.portsInput).textFieldStyle(PlainTextFieldStyle()).font(.caption).foregroundColor(.white).frame(width: 110).padding(.horizontal, 6).padding(.vertical, 3).background(Color(red: 0.06, green: 0.08, blue: 0.15)).cornerRadius(4)
-                                  }
-
-                                  HStack {
-                                      Text("线程数").font(.caption).foregroundColor(.gray)
-                                      TextField("200", value: $vm.threadCount, format: .number).textFieldStyle(PlainTextFieldStyle()).font(.caption).foregroundColor(.white).frame(width: 50).padding(.horizontal, 6).padding(.vertical, 3).background(Color(red: 0.06, green: 0.08, blue: 0.15)).cornerRadius(4)
-                                      Spacer()
-                                      Text("超时(秒)").font(.caption).foregroundColor(.gray)
-                                      TextField("3", value: $vm.timeout, format: .number).textFieldStyle(PlainTextFieldStyle()).font(.caption).foregroundColor(.white).frame(width: 40).padding(.horizontal, 6).padding(.vertical, 3).background(Color(red: 0.06, green: 0.08, blue: 0.15)).cornerRadius(4)
-                                      Spacer()
-                                      Text("SNI域名").font(.caption).foregroundColor(.gray)
-                                      TextField("speed.cloudflare.com", text: $vm.sniDomain).textFieldStyle(PlainTextFieldStyle()).font(.caption).foregroundColor(.white).frame(width: 130).padding(.horizontal, 6).padding(.vertical, 3).background(Color(red: 0.06, green: 0.08, blue: 0.15)).cornerRadius(4)
-                                  }
-
-                                  HStack {
-                                      Text("运营商").font(.caption).foregroundColor(.gray)
-                                      Picker("", selection: $vm.selectedISP) {
-                                          ForEach(ispOptions, id: \.self) { Text($0).tag($0) }
-                                      }.pickerStyle(MenuPickerStyle()).frame(width: 100).tint(.blue)
-                                      if vm.selectedISP == "自动识别" {
-                                          Text("📍 \(vm.detectedISP)").font(.caption).foregroundColor(.blue)
-                                      }
-                                      Spacer()
-                                      Text("当前: \(vm.currentISP)").font(.caption).foregroundColor(.green)
-                                  }
-                              }
-                              .padding(12)
-                              .background(Color(red: 0.10, green: 0.13, blue: 0.22))
-                              .cornerRadius(10)
-
-                              // 3. 严格模式
-                              VStack(alignment: .leading, spacing: 8) {
-                                  HStack {
-                                      Text("🔒 严格模式 (TLS握手)").font(.headline).foregroundColor(.white)
-                                      Spacer()
-                                      Toggle("", isOn: $vm.strictMode).labelsHidden().tint(.blue)
-                                  }
-                                  Text("只扫描指定地区：").font(.caption).foregroundColor(.gray)
-                                  Text("不勾选任何地区 = 扫描全部地区").font(.caption2).foregroundColor(.orange)
-
-                                  ScrollView(.horizontal, showsIndicators: false) {
-                                      HStack(spacing: 6) {
-                                          ForEach(regionList, id: \.self) { region in
-                                              Button {
-                                                  vm.toggleRegion(region)
-                                              } label: {
-                                                  Text(region).font(.caption).padding(.horizontal, 10).padding(.vertical, 4).background(vm.selectedRegions.contains(region) ? Color.blue : Color(red: 0.06, green: 0.08, blue: 0.15)).foregroundColor(vm.selectedRegions.contains(region) ? .white : .gray).cornerRadius(12)
-                                              }
-                                          }
-                                      }
-                                  }
-
-                                  HStack {
-                                      Button {
-                                          vm.startScan()
-                                      } label: {
-                                          Label(vm.isScanning ? "扫描中..." : "开始扫描", systemImage: "play.fill").font(.caption).padding(.horizontal, 16).padding(.vertical, 6).background(Color.blue).foregroundColor(.white).cornerRadius(6)
-                                      }.disabled(vm.isScanning || vm.ipList.isEmpty)
-
-                                      Button {
-                                          vm.stopScan()
-                                      } label: {
-                                          Label("停止", systemImage: "stop.fill").font(.caption).padding(.horizontal, 16).padding(.vertical, 6).background(Color.red).foregroundColor(.white).cornerRadius(6)
-                                      }.disabled(!vm.isScanning)
-
-                                      Spacer()
-                                      HStack(spacing: 4) {
-                                          Circle().fill(vm.isScanning ? Color.green : Color.gray).frame(width: 6, height: 6)
-                                          Text(vm.statusText).font(.caption).foregroundColor(.gray)
-                                      }
-                                  }
-                              }
-                              .padding(12)
-                              .background(Color(red: 0.10, green: 0.13, blue: 0.22))
-                              .cornerRadius(10)
-
-                              // 4. 可用IP列表
-                              VStack(alignment: .leading, spacing: 8) {
-                                  Text("📋 可用IP（仅显示可连接的IP）").font(.headline).foregroundColor(.white)
-
-                                  HStack {
-                                      Text("地区筛选").font(.caption).foregroundColor(.gray)
-                                      TextField("输入地区", text: $vm.regionFilter).textFieldStyle(PlainTextFieldStyle()).font(.caption).foregroundColor(.white).frame(width: 100).padding(.horizontal, 6).padding(.vertical, 3).background(Color(red: 0.06, green: 0.08, blue: 0.15)).cornerRadius(4)
-                                      Spacer()
-                                      Text("端口筛选").font(.caption).foregroundColor(.gray)
-                                      TextField("输入端口", text: $vm.portFilter).textFieldStyle(PlainTextFieldStyle()).font(.caption).foregroundColor(.white).frame(width: 70).padding(.horizontal, 6).padding(.vertical, 3).background(Color(red: 0.06, green: 0.08, blue: 0.15)).cornerRadius(4)
-                                      Spacer()
-                                      Text("共 \(vm.filteredIPs.count) 个").font(.caption).foregroundColor(.blue)
-                                  }
-
-                                  if vm.filteredIPs.isEmpty {
-                                      Text(vm.isScanning ? "扫描中..." : "暂无数据").font(.caption).foregroundColor(.gray).frame(maxWidth: .infinity, alignment: .center).padding(.vertical, 16)
-                                  } else {
-                                      ScrollView {
-                                          LazyVStack(alignment: .leading, spacing: 3) {
-                                              ForEach(vm.filteredIPs) { ip in
-                                                  HStack {
-                                                      Text(ip.ip).font(.system(.caption, design: .monospaced)).foregroundColor(.white)
-                                                      Text(":\(ip.port)").font(.caption2).foregroundColor(.gray)
-                                                      Spacer()
-                                                      Text("\(String(format: "%.0f", ip.delay))ms").font(.caption).fontWeight(.bold).foregroundColor(ip.qualityColor)
-                                                      Text(ip.qualityText).font(.caption2)
-                                                      if !ip.colo.isEmpty { Text("🏢\(ip.colo)").font(.caption2).foregroundColor(.gray) }
-                                                      Text("📍\(ip.country)").font(.caption2).foregroundColor(.gray)
-                                                  }.padding(.vertical, 2).padding(.horizontal, 6).background(Color(red: 0.06, green: 0.08, blue: 0.15).opacity(0.5)).cornerRadius(4)
-                                              }
-                                          }
-                                      }.frame(maxHeight: 150)
-                                  }
-                              }
-                              .padding(12)
-                              .background(Color(red: 0.10, green: 0.13, blue: 0.22))
-                              .cornerRadius(10)
-
-                              // 5. 输出文本
-                              VStack(alignment: .leading, spacing: 8) {
-                                  Text("📝 输出文本（可编辑/可复制）").font(.headline).foregroundColor(.white)
-                                  TextEditor(text: $vm.outputText).font(.system(.caption, design: .monospaced)).foregroundColor(.white).frame(height: 80).background(Color(red: 0.06, green: 0.08, blue: 0.15)).cornerRadius(6)
-
-                                  HStack {
-                                      Button {
-                                          UIPasteboard.general.string = vm.outputText
-                                          vm.alertMessage = "✅ 已复制到剪贴板"
-                                          vm.showingAlert = true
-                                      } label: {
-                                          Label("复制", systemImage: "doc.on.doc").font(.caption).padding(.horizontal, 12).padding(.vertical, 4).background(Color.blue.opacity(0.15)).foregroundColor(.blue).cornerRadius(6)
-                                      }.disabled(vm.outputText.isEmpty)
-
-                                      Button {
-                                          vm.exportIPs()
-                                      } label: {
-                                          Label("导出可用IP", systemImage: "square.and.arrow.up").font(.caption).padding(.horizontal, 12).padding(.vertical, 4).background(Color.green.opacity(0.15)).foregroundColor(.green).cornerRadius(6)
-                                      }.disabled(vm.filteredIPs.isEmpty)
-
-                                      Spacer()
-                                      if !vm.outputText.isEmpty {
-                                          Text("\(vm.outputText.components(separatedBy: "\n").count) 行").font(.caption2).foregroundColor(.gray)
-                                      }
-                                  }
-                              }
-                              .padding(12)
-                              .background(Color(red: 0.10, green: 0.13, blue: 0.22))
-                              .cornerRadius(10)
-                          }
-                          .padding(.horizontal, 12)
-                          .padding(.bottom, 20)
-                      }
-                  }
-                  .alert("提示", isPresented: $vm.showingAlert) {
-                      Button("确定") {}
-                  } message: {
-                      Text(vm.alertMessage)
-                  }
-                  .onAppear {
-                      vm.detectISP()
-                  }
-              }
-          }
-
-          // MARK: - 粘贴导入
-          struct PasteImportView: View {
-              @ObservedObject var vm: ScanViewModel
-              @Environment(\.dismiss) var dismiss
-              @State private var pasteText = ""
-
-              var body: some View {
-                  ZStack {
-                      Color(red: 0.06, green: 0.08, blue: 0.15).ignoresSafeArea()
-                      VStack {
-                          Text("📋 粘贴导入").font(.headline).foregroundColor(.white).padding(.top, 20)
-                          Text("每行一个IP，支持格式: 1.1.1.1 或 1.1.1.1:443").font(.caption).foregroundColor(.gray)
-                          TextEditor(text: $pasteText).font(.system(.body, design: .monospaced)).foregroundColor(.white).background(Color(red: 0.10, green: 0.13, blue: 0.22)).cornerRadius(8).padding().frame(maxHeight: .infinity)
-                          HStack(spacing: 16) {
-                              Button("取消") { dismiss() }.buttonStyle(.bordered)
-                              Button("导入") {
-                                  vm.importFromPaste(text: pasteText)
-                                  dismiss()
-                              }.buttonStyle(.borderedProminent).disabled(pasteText.isEmpty)
-                          }.padding(.bottom, 20)
-                      }.padding()
-                  }
-                  .presentationDetents([.large])
-              }
-          }
-
-          // MARK: - ViewModel
-          class ScanViewModel: ObservableObject {
+          class ScanManager: ObservableObject {
               @Published var ipList: [IPInfo] = []
-              @Published var filteredIPs: [IPInfo] = []
+              @Published var results: [IPInfo] = []
               @Published var isScanning = false
-              @Published var statusText = "就绪"
-              @Published var outputText = ""
+              @Published var log: String = "就绪"
               @Published var availableCount = 0
-              @Published var avgDelay: Double = 0
-              @Published var minDelay: Double = 0
+              @Published var bestDelay: Double = 0
 
-              @Published var ipSourceText = ""
-              @Published var showingFileImporter = false
-              @Published var showingPasteSheet = false
+              private var task: Task<Void, Never>?
+              private let semaphore = DispatchSemaphore(value: 100)
 
-              @Published var scanCount = ""
-              @Published var portsInput = "443,2053,8443"
-              @Published var threadCount = 200
-              @Published var timeout = 3
-              @Published var sniDomain = "speed.cloudflare.com"
-              @Published var selectedISP = "自动识别"
-
-              @Published var detectedISP: String = "检测中..."
-              @Published var currentISP: String = "检测中..."
-
-              @Published var strictMode = false
-              @Published var selectedRegions: [String] = []
-
-              @Published var regionFilter = ""
-              @Published var portFilter = ""
-
-              @Published var showingAlert = false
-              @Published var alertMessage = ""
-
-              private var scanTask: Task<Void, Never>?
-
-              // MARK: - 自动检测运营商
-              func detectISP() {
-                  guard let url = URL(string: "http://ip-api.com/json/?fields=isp") else { return }
-                  URLSession.shared.dataTask(with: url) { data, _, _ in
-                      guard let data = data else { return }
-                      if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                         let isp = json["isp"] as? String {
-                          DispatchQueue.main.async {
-                              self.detectedISP = isp
-                              self.currentISP = isp
-                          }
-                      }
-                  }.resume()
-              }
-
-              // MARK: - 导入文件
-              func importFile(result: Result<URL, Error>) {
-                  switch result {
-                  case .success(let url):
-                      guard url.startAccessingSecurityScopedResource() else { return }
-                      defer { url.stopAccessingSecurityScopedResource() }
-                      do {
-                          let text = try String(contentsOf: url, encoding: .utf8)
-                          importFromPaste(text: text)
-                      } catch {
-                          alertMessage = "❌ 导入失败"
-                          showingAlert = true
-                      }
-                  case .failure:
-                      alertMessage = "❌ 选择文件失败"
-                      showingAlert = true
-                  }
-              }
-
-              // MARK: - 粘贴导入
-              func importFromPaste(text: String) {
-                  let lines = text.split(separator: "\n").map { String($0).trimmingCharacters(in: .whitespaces) }
-                  var ips: [IPInfo] = []
-                  for line in lines {
-                      if line.isEmpty { continue }
-                      let parts = line.split(separator: ":")
+              func importIPs(_ text: String) {
+                  var list: [IPInfo] = []
+                  for line in text.split(separator: "\n") {
+                      let s = String(line).trimmingCharacters(in: .whitespaces)
+                      if s.isEmpty { continue }
+                      let parts = s.split(separator: ":")
                       let ip = String(parts[0])
                       let port = parts.count > 1 ? Int(parts[1]) ?? 443 : 443
                       if ip.contains(".") || ip.contains(":") {
-                          ips.append(IPInfo(ip: ip, port: port))
+                          list.append(IPInfo(ip: ip, port: port))
                       }
                   }
-                  ipList = ips
-                  filteredIPs = ips
-                  ipSourceText = "已导入 \(ips.count) 个IP"
-                  outputText = ""
-                  alertMessage = "✅ 成功导入 \(ips.count) 个IP"
-                  showingAlert = true
+                  self.ipList = list
+                  self.results = []
+                  self.log = "已导入 \(list.count) 个IP"
               }
 
-              // MARK: - 切换地区
-              func toggleRegion(_ region: String) {
-                  if region == "全部地区" {
-                      selectedRegions = []
-                  } else if selectedRegions.contains(region) {
-                      selectedRegions.removeAll { $0 == region }
-                  } else {
-                      selectedRegions.append(region)
-                  }
-              }
-
-              // MARK: - 开始扫描
-              func startScan() {
-                  guard !ipList.isEmpty else {
-                      alertMessage = "❌ 请先导入IP列表"
-                      showingAlert = true
-                      return
-                  }
-
-                  currentISP = selectedISP == "自动识别" ? detectedISP : selectedISP
-
+              func startScan(ports: [Int], timeout: Int) {
+                  guard !ipList.isEmpty else { return }
                   isScanning = true
-                  statusText = "扫描中..."
-                  filteredIPs = []
-                  outputText = ""
+                  results = []
                   availableCount = 0
-                  avgDelay = 0
-                  minDelay = 0
+                  bestDelay = 0
+                  log = "扫描中..."
 
                   let ips = ipList
-                  let ports = parsePorts(portsInput)
-                  var results: [IPInfo] = []
+                  var allResults: [IPInfo] = []
                   let lock = NSLock()
-                  var processed = 0
-                  let total = ips.count * ports.count
-                  let currentISPValue = currentISP
-                  let selectedRegionsValue = selectedRegions
-                  let timeoutValue = timeout
 
-                  scanTask = Task.detached(priority: .high) {
-                      let semaphore = DispatchSemaphore(value: self.threadCount)
+                  task = Task.detached {
+                      let semaphore = self.semaphore
 
                       await withTaskGroup(of: [IPInfo].self) { group in
                           for ip in ips {
-                              if Task.isCancelled { break }
                               for port in ports {
-                                  if Task.isCancelled { break }
                                   group.addTask {
                                       semaphore.wait()
                                       defer { semaphore.signal() }
-                                      return await self.scanIP(ip: ip, port: port, currentISP: currentISPValue, selectedRegions: selectedRegionsValue, timeout: timeoutValue)
+                                      return await self.checkIP(ip: ip, port: port, timeout: timeout)
                                   }
                               }
                           }
 
                           for await batch in group {
                               lock.lock()
-                              results.append(contentsOf: batch)
-                              processed += 1
+                              allResults.append(contentsOf: batch)
                               lock.unlock()
 
                               await MainActor.run {
-                                  let available = results.filter { $0.isAvailable }
-                                  self.filteredIPs = available
+                                  let available = allResults.filter { $0.isAvailable }
+                                  self.results = available
                                   self.availableCount = available.count
-                                  self.statusText = "扫描中... \(self.availableCount) 个可用"
                                   let delays = available.map { $0.delay }.filter { $0 > 0 }
                                   if !delays.isEmpty {
-                                      self.avgDelay = delays.reduce(0, +) / Double(delays.count)
-                                      self.minDelay = delays.min() ?? 0
+                                      self.bestDelay = delays.min() ?? 0
                                   }
+                                  self.log = "已找到 \(self.availableCount) 个可用IP"
                               }
                           }
                       }
 
                       await MainActor.run {
                           self.isScanning = false
-                          self.ipList = results
-                          self.filteredIPs = results.filter { $0.isAvailable }
-                          self.availableCount = self.filteredIPs.count
-                          self.statusText = "扫描完成 - 共 \(self.availableCount) 个可用IP"
-                          self.outputText = self.filteredIPs.map { $0.displayText }.joined(separator: "\n")
-                          self.alertMessage = "✅ 扫描完成！找到 \(self.availableCount) 个可用IP"
-                          self.showingAlert = true
+                          self.log = "扫描完成！共 \(self.availableCount) 个可用IP"
                       }
                   }
               }
 
-              // MARK: - 扫描单个IP
-              private func scanIP(ip: IPInfo, port: Int, currentISP: String, selectedRegions: [String], timeout: Int) async -> [IPInfo] {
-                  var result = ip
-                  result.port = port
-
-                  let delay = await testHTTP(ip: ip.ip, port: port, timeout: timeout)
-                  result.delay = delay.delay
-                  result.colo = delay.colo ?? ""
-                  result.isAvailable = delay.delay > 0
-
-                  if result.isAvailable {
-                      let loc = await getLocation(ip: ip.ip)
-                      result.country = loc.country
-                      result.city = loc.city
-                      result.isp = loc.isp
-                      result.region = loc.region
-
-                      if !selectedRegions.isEmpty && !selectedRegions.contains(loc.region) {
-                          return []
-                      }
-
-                      if currentISP != "检测中..." && currentISP != "检测失败" && !currentISP.isEmpty {
-                          let ispMatch = loc.isp.localizedCaseInsensitiveContains(currentISP) || currentISP.localizedCaseInsensitiveContains(loc.isp)
-                          if !ispMatch && !loc.isp.isEmpty {
-                              return []
-                          }
-                      }
-                  }
-
-                  return result.isAvailable ? [result] : []
+              func stopScan() {
+                  task?.cancel()
+                  isScanning = false
+                  log = "已停止"
               }
 
-              // MARK: - HTTP测试
-              private func testHTTP(ip: String, port: Int, timeout: Int) async -> (delay: Double, colo: String?) {
-                  let urlString = "https://\(ip):\(port)/cdn-cgi/trace"
-                  guard let url = URL(string: urlString) else { return (-1, nil) }
-
+              private func checkIP(ip: IPInfo, port: Int, timeout: Int) async -> [IPInfo] {
+                  let url = URL(string: "https://\(ip.ip):\(port)/cdn-cgi/trace")!
                   let start = Date()
                   let config = URLSessionConfiguration.default
                   config.timeoutIntervalForRequest = TimeInterval(timeout)
                   config.timeoutIntervalForResource = TimeInterval(timeout)
-                  let session = URLSession(configuration: config)
 
                   do {
-                      let (data, response) = try await session.data(from: url)
-                      if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                      let (data, response) = try await URLSession(configuration: config).data(from: url)
+                      if let http = response as? HTTPURLResponse, http.statusCode == 200 {
                           let delay = Date().timeIntervalSince(start) * 1000
                           let text = String(data: data, encoding: .utf8) ?? ""
-                          var colo: String? = nil
+                          var colo = ""
                           for line in text.split(separator: "\n") {
                               if line.hasPrefix("colo=") {
                                   colo = String(line.dropFirst(5))
                                   break
                               }
                           }
-                          return (delay, colo)
+                          var info = ip
+                          info.port = port
+                          info.delay = delay
+                          info.colo = colo
+                          info.isAvailable = true
+
+                          // 获取地区
+                          if let loc = await getLocation(ip: ip.ip) {
+                              info.country = loc.country
+                              info.isp = loc.isp
+                          }
+                          return [info]
                       }
-                  } catch {
-                      return (-1, nil)
-                  }
-                  return (-1, nil)
+                  } catch {}
+                  return []
               }
 
-              // MARK: - 获取位置
-              private func getLocation(ip: String) async -> (country: String, city: String, isp: String, region: String) {
-                  let urlString = "http://ip-api.com/json/\(ip)?fields=status,country,city,isp,regionName"
-                  guard let url = URL(string: urlString) else { return ("", "", "", "") }
-
+              private func getLocation(ip: String) async -> (country: String, isp: String)? {
+                  let url = URL(string: "http://ip-api.com/json/\(ip)?fields=status,country,isp")!
                   do {
                       let (data, _) = try await URLSession.shared.data(from: url)
                       if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                          json["status"] as? String == "success" {
-                          let country = json["country"] as? String ?? ""
-                          let city = json["city"] as? String ?? ""
-                          let isp = json["isp"] as? String ?? ""
-                          let region = json["regionName"] as? String ?? ""
-                          return (country, city, isp, region)
+                          return (json["country"] as? String ?? "", json["isp"] as? String ?? "")
                       }
-                  } catch {
-                      return ("", "", "", "")
-                  }
-                  return ("", "", "", "")
+                  } catch {}
+                  return nil
               }
 
-              // MARK: - 停止扫描
-              func stopScan() {
-                  scanTask?.cancel()
-                  isScanning = false
-                  statusText = "已停止"
-              }
-
-              // MARK: - 解析端口
-              private func parsePorts(_ input: String) -> [Int] {
-                  let parts = input.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
-                  return parts.compactMap { Int($0) }.filter { $0 > 0 && $0 < 65536 }
-              }
-
-              // MARK: - 导出IP
-              func exportIPs() {
-                  let text = filteredIPs.map { $0.displayText }.joined(separator: "\n")
-                  outputText = text
+              func copyResult() {
+                  let text = results.map { "\($0.ip):\($0.port)" }.joined(separator: "\n")
                   UIPasteboard.general.string = text
-                  alertMessage = "✅ 已导出 \(filteredIPs.count) 个IP"
-                  showingAlert = true
               }
 
-              // MARK: - 筛选更新
-              func updateFilter() {
-                  var filtered = ipList.filter { $0.isAvailable }
-                  if !regionFilter.isEmpty {
-                      filtered = filtered.filter { $0.country.localizedCaseInsensitiveContains(regionFilter) || $0.region.localizedCaseInsensitiveContains(regionFilter) }
+              func copyDetail() {
+                  let text = results.map { "\($0.ip):\($0.port)  [\(String(format: "%.0f", $0.delay))ms] \($0.country) \($0.colo)" }.joined(separator: "\n")
+                  UIPasteboard.general.string = text
+              }
+          }
+
+          struct ContentView: View {
+              @StateObject private var manager = ScanManager()
+              @State private var inputText: String = ""
+              @State private var portText: String = "443,2053,8443"
+              @State private var timeoutText: String = "3"
+              @State private var showPaste = false
+              @State private var alertMsg = ""
+
+              var body: some View {
+                  ZStack {
+                      Color(red: 0.06, green: 0.08, blue: 0.15).ignoresSafeArea()
+
+                      VStack(spacing: 0) {
+                          // 标题
+                          HStack {
+                              Text("🚀 优选IP筛选")
+                                  .font(.title2)
+                                  .fontWeight(.bold)
+                                  .foregroundColor(.white)
+                              Spacer()
+                              if manager.isScanning {
+                                  ProgressView().scaleEffect(0.7)
+                              }
+                              Text("\(manager.availableCount)")
+                                  .font(.title3)
+                                  .foregroundColor(.green)
+                          }
+                          .padding(.horizontal)
+                          .padding(.top, 12)
+
+                          // 状态栏
+                          HStack(spacing: 16) {
+                              VStack { Text("总数").font(.caption2).foregroundColor(.gray); Text("\(manager.ipList.count)").foregroundColor(.white) }
+                              VStack { Text("可用").font(.caption2).foregroundColor(.gray); Text("\(manager.availableCount)").foregroundColor(.green) }
+                              VStack { Text("最佳").font(.caption2).foregroundColor(.gray); Text(manager.bestDelay > 0 ? String(format: "%.0fms", manager.bestDelay) : "--").foregroundColor(.orange) }
+                              Spacer()
+                              Text(manager.log).font(.caption).foregroundColor(.gray)
+                          }
+                          .padding(.horizontal)
+                          .padding(.vertical, 8)
+                          .background(Color(red: 0.10, green: 0.13, blue: 0.22))
+                          .cornerRadius(8)
+                          .padding(.horizontal)
+
+                          // 输入区
+                          ScrollView {
+                              VStack(spacing: 12) {
+                                  // 导入
+                                  VStack(alignment: .leading) {
+                                      Text("📂 导入IP").font(.headline).foregroundColor(.white)
+                                      HStack {
+                                          Button {
+                                              showPaste = true
+                                          } label: {
+                                              Label("粘贴导入", systemImage: "doc.on.clipboard")
+                                                  .font(.caption)
+                                                  .padding(.horizontal, 12)
+                                                  .padding(.vertical, 6)
+                                                  .background(Color.blue.opacity(0.2))
+                                                  .foregroundColor(.blue)
+                                                  .cornerRadius(6)
+                                          }
+                                          .sheet(isPresented: $showPaste) {
+                                              PasteView(manager: manager)
+                                          }
+
+                                          if !manager.ipList.isEmpty {
+                                              Text("已导入 \(manager.ipList.count) 个")
+                                                  .font(.caption)
+                                                  .foregroundColor(.green)
+                                          }
+                                          Spacer()
+                                      }
+                                  }
+                                  .padding(12)
+                                  .background(Color(red: 0.10, green: 0.13, blue: 0.22))
+                                  .cornerRadius(10)
+                                  .padding(.horizontal)
+
+                                  // 设置
+                                  VStack(alignment: .leading, spacing: 8) {
+                                      Text("⚙️ 设置").font(.headline).foregroundColor(.white)
+                                      HStack {
+                                          Text("端口").font(.caption).foregroundColor(.gray)
+                                          TextField("443,2053,8443", text: $portText)
+                                              .textFieldStyle(PlainTextFieldStyle())
+                                              .font(.caption)
+                                              .foregroundColor(.white)
+                                              .frame(width: 120)
+                                              .padding(.horizontal, 6)
+                                              .padding(.vertical, 3)
+                                              .background(Color(red: 0.06, green: 0.08, blue: 0.15))
+                                              .cornerRadius(4)
+
+                                          Spacer()
+
+                                          Text("超时").font(.caption).foregroundColor(.gray)
+                                          TextField("3", text: $timeoutText)
+                                              .textFieldStyle(PlainTextFieldStyle())
+                                              .font(.caption)
+                                              .foregroundColor(.white)
+                                              .frame(width: 40)
+                                              .padding(.horizontal, 6)
+                                              .padding(.vertical, 3)
+                                              .background(Color(red: 0.06, green: 0.08, blue: 0.15))
+                                              .cornerRadius(4)
+                                          Text("秒").font(.caption).foregroundColor(.gray)
+                                      }
+                                  }
+                                  .padding(12)
+                                  .background(Color(red: 0.10, green: 0.13, blue: 0.22))
+                                  .cornerRadius(10)
+                                  .padding(.horizontal)
+
+                                  // 操作按钮
+                                  HStack(spacing: 12) {
+                                      Button {
+                                          let ports = portText.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+                                          let timeout = Int(timeoutText) ?? 3
+                                          manager.startScan(ports: ports, timeout: timeout)
+                                      } label: {
+                                          Label(manager.isScanning ? "扫描中" : "开始扫描", systemImage: "play.fill")
+                                              .frame(maxWidth: .infinity)
+                                              .padding(.vertical, 8)
+                                              .background(Color.blue)
+                                              .foregroundColor(.white)
+                                              .cornerRadius(8)
+                                      }
+                                      .disabled(manager.isScanning || manager.ipList.isEmpty)
+
+                                      Button {
+                                          manager.stopScan()
+                                      } label: {
+                                          Label("停止", systemImage: "stop.fill")
+                                              .frame(maxWidth: .infinity)
+                                              .padding(.vertical, 8)
+                                              .background(Color.red)
+                                              .foregroundColor(.white)
+                                              .cornerRadius(8)
+                                      }
+                                      .disabled(!manager.isScanning)
+                                  }
+                                  .padding(.horizontal)
+
+                                  // 结果列表
+                                  VStack(alignment: .leading) {
+                                      HStack {
+                                          Text("📋 可用IP (\(manager.results.count))").font(.headline).foregroundColor(.white)
+                                          Spacer()
+                                          if !manager.results.isEmpty {
+                                              Button("复制") {
+                                                  manager.copyResult()
+                                                  alertMsg = "已复制"
+                                              }
+                                              .font(.caption)
+                                              .foregroundColor(.blue)
+                                              .padding(.horizontal, 8)
+                                              .padding(.vertical, 2)
+                                              .background(Color.blue.opacity(0.15))
+                                              .cornerRadius(4)
+
+                                              Button("详情") {
+                                                  manager.copyDetail()
+                                                  alertMsg = "已复制详情"
+                                              }
+                                              .font(.caption)
+                                              .foregroundColor(.green)
+                                              .padding(.horizontal, 8)
+                                              .padding(.vertical, 2)
+                                              .background(Color.green.opacity(0.15))
+                                              .cornerRadius(4)
+                                          }
+                                      }
+
+                                      if manager.results.isEmpty {
+                                          Text("暂无数据，请导入IP并开始扫描")
+                                              .font(.caption)
+                                              .foregroundColor(.gray)
+                                              .frame(maxWidth: .infinity, alignment: .center)
+                                              .padding(.vertical, 20)
+                                      } else {
+                                          ScrollView {
+                                              LazyVStack(alignment: .leading, spacing: 2) {
+                                                  ForEach(manager.results) { ip in
+                                                      HStack {
+                                                          Text(ip.ip).font(.system(.caption, design: .monospaced)).foregroundColor(.white)
+                                                          Text(":\(ip.port)").font(.caption2).foregroundColor(.gray)
+                                                          Spacer()
+                                                          Text("\(String(format: "%.0f", ip.delay))ms").font(.caption).foregroundColor(ip.delay < 50 ? .green : ip.delay < 100 ? .orange : .red)
+                                                          if !ip.colo.isEmpty { Text(ip.colo).font(.caption2).foregroundColor(.blue) }
+                                                          if !ip.country.isEmpty { Text(ip.country).font(.caption2).foregroundColor(.gray) }
+                                                      }
+                                                      .padding(.vertical, 2)
+                                                      .padding(.horizontal, 6)
+                                                      .background(Color(red: 0.06, green: 0.08, blue: 0.15))
+                                                      .cornerRadius(4)
+                                                  }
+                                              }
+                                          }
+                                          .frame(maxHeight: 200)
+                                      }
+                                  }
+                                  .padding(12)
+                                  .background(Color(red: 0.10, green: 0.13, blue: 0.22))
+                                  .cornerRadius(10)
+                                  .padding(.horizontal)
+
+                                  Spacer(minLength: 20)
+                              }
+                          }
+                      }
                   }
-                  if !portFilter.isEmpty, let port = Int(portFilter) {
-                      filtered = filtered.filter { $0.port == port }
+                  .alert(alertMsg, isPresented: .constant(!alertMsg.isEmpty)) {
+                      Button("确定") { alertMsg = "" }
                   }
-                  filteredIPs = filtered
-                  outputText = filtered.map { $0.displayText }.joined(separator: "\n")
+              }
+          }
+
+          struct PasteView: View {
+              @ObservedObject var manager: ScanManager
+              @Environment(\.dismiss) var dismiss
+              @State private var text: String = ""
+
+              var body: some View {
+                  ZStack {
+                      Color(red: 0.06, green: 0.08, blue: 0.15).ignoresSafeArea()
+                      VStack {
+                          Text("📋 粘贴IP列表").font(.headline).foregroundColor(.white).padding(.top)
+                          Text("每行一个IP，支持 1.1.1.1 或 1.1.1.1:443").font(.caption).foregroundColor(.gray)
+                          TextEditor(text: $text)
+                              .font(.system(.body, design: .monospaced))
+                              .foregroundColor(.white)
+                              .background(Color(red: 0.10, green: 0.13, blue: 0.22))
+                              .cornerRadius(8)
+                              .padding()
+                              .frame(maxHeight: .infinity)
+
+                          HStack(spacing: 16) {
+                              Button("取消") { dismiss() }.buttonStyle(.bordered)
+                              Button("导入") {
+                                  manager.importIPs(text)
+                                  dismiss()
+                              }.buttonStyle(.borderedProminent).disabled(text.isEmpty)
+                          }
+                          .padding(.bottom)
+                      }
+                      .padding()
+                  }
+                  .presentationDetents([.large])
               }
           }
           EOF
 
-          # ========== Assets ==========
           cat > CloudFlareScan/Assets.xcassets/Contents.json << 'EOF'
           {"info":{"author":"xcode","version":1}}
           EOF
@@ -700,7 +503,6 @@ jobs:
           {"images":[{"idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"xcode","version":1}}
           EOF
 
-          # ========== Xcode Project ==========
           cat > CloudFlareScan.xcodeproj/project.pbxproj << 'EOF'
           // !$*UTF8*$!
           {
@@ -708,92 +510,56 @@ jobs:
               classes = {};
               objectVersion = 56;
               objects = {
-                  /* Begin PBXBuildFile section */
-                  C100000001 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C100000002 /* AppDelegate.swift */; };
-                  C100000003 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C100000004 /* ContentView.swift */; };
-                  C100000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C100000006 /* Assets.xcassets */; };
-                  /* End PBXBuildFile section */
-
-                  /* Begin PBXFileReference section */
-                  C100000002 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
-                  C100000004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-                  C100000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-                  C100000007 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-                  C100000008 /* CloudFlareScan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CloudFlareScan.app; sourceTree = BUILT_PRODUCTS_DIR; };
-                  /* End PBXFileReference section */
-
-                  /* Begin PBXGroup section */
-                  C100000009 = {isa = PBXGroup; children = (C100000010, C100000011,); sourceTree = "<group>"; };
-                  C100000010 /* CloudFlareScan */ = {isa = PBXGroup; children = (C100000002, C100000004, C100000006, C100000007,); path = CloudFlareScan; sourceTree = "<group>"; };
-                  C100000011 /* Products */ = {isa = PBXGroup; children = (C100000008,); name = Products; sourceTree = "<group>"; };
-                  /* End PBXGroup section */
-
-                  /* Begin PBXNativeTarget section */
-                  C100000012 /* CloudFlareScan */ = {isa = PBXNativeTarget; buildConfigurationList = C100000013; buildPhases = (C100000014, C100000015,); buildRules = (); dependencies = (); name = CloudFlareScan; productName = CloudFlareScan; productReference = C100000008; productType = "com.apple.product-type.application"; };
-                  /* End PBXNativeTarget section */
-
-                  /* Begin PBXProject section */
-                  C100000016 /* Project object */ = {isa = PBXProject; attributes = {LastSwiftUpdateCheck = 1500; LastUpgradeCheck = 1500; TargetAttributes = {C100000012 = {CreatedOnToolsVersion = 15.0;};};}; buildConfigurationList = C100000017; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base,); mainGroup = C100000009; productRefGroup = C100000011; projectDirPath = ""; projectRoot = ""; targets = (C100000012,); };
-                  /* End PBXProject section */
-
-                  /* Begin PBXResourcesBuildPhase section */
-                  C100000015 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (C100000005,); runOnlyForDeploymentPostprocessing = 0; };
-                  /* End PBXResourcesBuildPhase section */
-
-                  /* Begin PBXSourcesBuildPhase section */
-                  C100000014 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (C100000001, C100000003,); runOnlyForDeploymentPostprocessing = 0; };
-                  /* End PBXSourcesBuildPhase section */
-
-                  /* Begin XCBuildConfiguration section */
-                  C100000018 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
-                  C100000019 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
-                  C100000020 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; INFOPLIST_FILE = CloudFlareScan/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; SWIFT_VERSION = 5.0; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
-                  C100000021 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; INFOPLIST_FILE = CloudFlareScan/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; SWIFT_VERSION = 5.0; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
-                  /* End XCBuildConfiguration section */
-
-                  /* Begin XCConfigurationList section */
-                  C100000013 = {isa = XCConfigurationList; buildConfigurations = (C100000020, C100000021,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-                  C100000017 = {isa = XCConfigurationList; buildConfigurations = (C100000018, C100000019,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-                  /* End XCConfigurationList section */
+                  D100000001 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = D100000002 /* AppDelegate.swift */; };
+                  D100000003 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D100000004 /* ContentView.swift */; };
+                  D100000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D100000006 /* Assets.xcassets */; };
+                  D100000002 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+                  D100000004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+                  D100000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+                  D100000007 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+                  D100000008 /* CloudFlareScan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CloudFlareScan.app; sourceTree = BUILT_PRODUCTS_DIR; };
+                  D100000009 = {isa = PBXGroup; children = (D100000010, D100000011,); sourceTree = "<group>"; };
+                  D100000010 /* CloudFlareScan */ = {isa = PBXGroup; children = (D100000002, D100000004, D100000006, D100000007,); path = CloudFlareScan; sourceTree = "<group>"; };
+                  D100000011 /* Products */ = {isa = PBXGroup; children = (D100000008,); name = Products; sourceTree = "<group>"; };
+                  D100000012 /* CloudFlareScan */ = {isa = PBXNativeTarget; buildConfigurationList = D100000013; buildPhases = (D100000014, D100000015,); buildRules = (); dependencies = (); name = CloudFlareScan; productName = CloudFlareScan; productReference = D100000008; productType = "com.apple.product-type.application"; };
+                  D100000016 /* Project object */ = {isa = PBXProject; attributes = {LastSwiftUpdateCheck = 1500; LastUpgradeCheck = 1500; TargetAttributes = {D100000012 = {CreatedOnToolsVersion = 15.0;};};}; buildConfigurationList = D100000017; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base,); mainGroup = D100000009; productRefGroup = D100000011; projectDirPath = ""; projectRoot = ""; targets = (D100000012,); };
+                  D100000015 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (D100000005,); runOnlyForDeploymentPostprocessing = 0; };
+                  D100000014 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (D100000001, D100000003,); runOnlyForDeploymentPostprocessing = 0; };
+                  D100000018 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
+                  D100000019 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
+                  D100000020 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; INFOPLIST_FILE = CloudFlareScan/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; SWIFT_VERSION = 5.0; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
+                  D100000021 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; INFOPLIST_FILE = CloudFlareScan/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; SWIFT_VERSION = 5.0; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
+                  D100000013 = {isa = XCConfigurationList; buildConfigurations = (D100000020, D100000021,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+                  D100000017 = {isa = XCConfigurationList; buildConfigurations = (D100000018, D100000019,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
               };
-              rootObject = C100000016;
+              rootObject = D100000016;
           }
           EOF
 
-          echo "✅ 所有文件创建完成！"
-
-      - name: Build Archive
+      - name: Build
         run: |
           xcodebuild -project CloudFlareScan.xcodeproj \
             -scheme CloudFlareScan \
             -configuration Release \
             -derivedDataPath build \
-            clean archive \
-            -archivePath build/CloudFlareScan.xcarchive \
+            clean build \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            -skipUnavailableActions \
-            -quiet
+            CODE_SIGNING_ALLOWED=NO
 
-      - name: Find and Package IPA
+      - name: Package IPA
         run: |
-          APP_PATH=$(find build -name "*.app" -type d | head -1)
-          echo "找到 APP: $APP_PATH"
-
+          APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" -type d | head -1)
           if [ -z "$APP_PATH" ]; then
-            echo "❌ 未找到 .app 文件"
-            exit 1
+            APP_PATH=$(find build -name "*.app" -type d | head -1)
           fi
-
+          echo "找到: $APP_PATH"
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
           zip -r CloudFlareScan.ipa Payload
           cp CloudFlareScan.ipa CloudFlareScan.tipa
-          echo "✅ IPA 打包完成"
-          ls -la *.ipa *.tipa
 
-      - name: Upload Artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: CloudFlareScan-TrollStore
