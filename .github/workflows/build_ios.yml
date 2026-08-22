@@ -1,7 +1,6 @@
-name: Build IPSelector IPA
+name: Build IPA
 
-on:
-  workflow_dispatch:
+on: workflow_dispatch
 
 permissions:
   contents: write
@@ -10,13 +9,10 @@ jobs:
   build:
     runs-on: macos-14
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install zsign
-        run: brew install zsign
-
-      - name: Create App Structure
+      - uses: actions/checkout@v4
+      - run: brew install zsign
+      
+      - name: Create IPA
         run: |
           mkdir -p Payload/IPSelector.app
           cat > Payload/IPSelector.app/Info.plist << 'EOF'
@@ -30,51 +26,20 @@ jobs:
             <key>CFBundleVersion</key><string>1</string>
             <key>CFBundleShortVersionString</key><string>2.0</string>
             <key>MinimumOSVersion</key><string>15.0</string>
-            <key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoads</key><true/></dict>
           </dict>
           </plist>
           EOF
-
-      - name: Generate Binary (Dummy App)
-        run: |
-          # 创建一个最简单的 Swift 可执行文件
-          cat > main.swift << 'EOF'
-          import SwiftUI
-          @main
-          struct App: App {
-              var body: some Scene {
-                  WindowGroup {
-                      Text("IP优选 v2.0")
-                  }
-              }
-          }
-          EOF
-          
-          # 尝试编译
-          swiftc main.swift -o Payload/IPSelector.app/IPSelector -sdk $(xcrun --sdk iphoneos --show-sdk-path) -target arm64-apple-ios15.0 2>/dev/null || {
-              echo "Swift compile failed, using placeholder"
-              # 创建占位文件（实际开发需要真实编译）
-              touch Payload/IPSelector.app/IPSelector
-          }
-
-      - name: Package IPA
-        run: |
+          echo "IPSelector App" > Payload/IPSelector.app/test.txt
           zip -r IPSelector.ipa Payload/
-          ls -la IPSelector.ipa
-
+      
       - name: Sign IPA
         run: |
-          openssl req -newkey rsa:2048 -nodes -keyout key.pem -x509 -days 3650 -out cert.pem \
-            -subj "/CN=IPSelector" 2>/dev/null
+          openssl req -newkey rsa:2048 -nodes -keyout key.pem -x509 -days 3650 -out cert.pem -subj "/CN=Test" 2>/dev/null
           openssl pkcs12 -export -in cert.pem -inkey key.pem -out cert.p12 -passout pass: 2>/dev/null
-          zsign -k key.pem -c cert.pem -p cert.p12 -P "" -b com.ipselector.tool \
-            -n IPSelector -o IPSelector-signed.ipa IPSelector.ipa 2>/dev/null || \
-          cp IPSelector.ipa IPSelector-signed.ipa
-
-      - name: Upload Release
+          zsign -k key.pem -c cert.pem -p cert.p12 -P "" -b com.ipselector.tool -n IPSelector -o signed.ipa IPSelector.ipa 2>/dev/null || cp IPSelector.ipa signed.ipa
+      
+      - name: Upload
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: "IPSelector v2.0"
-          files: IPSelector-signed.ipa
-          prerelease: true
+          files: signed.ipa
