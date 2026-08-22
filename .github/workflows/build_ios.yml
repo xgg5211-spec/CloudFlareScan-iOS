@@ -20,14 +20,14 @@ jobs:
           sudo xcode-select -switch /Applications/Xcode.app/Contents/Developer
           xcodebuild -version
 
-      - name: Create iOS App
+      - name: Create Xcode Project using xcodebuild
         run: |
-          # 创建项目目录
+          # 用 xcodebuild 创建空项目
           mkdir -p CloudFlareScan
-          mkdir -p CloudFlareScan.xcodeproj
+          cd CloudFlareScan
 
-          # Info.plist
-          cat > CloudFlareScan/Info.plist << 'EOF'
+          # 创建 Info.plist
+          cat > Info.plist << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -69,459 +69,83 @@ jobs:
           </plist>
           EOF
 
-      - name: Create Source Files
+          cd ..
+
+      - name: Create Source Code
         run: |
-          # AppDelegate.h
-          cat > CloudFlareScan/AppDelegate.h << 'EOF'
+          cd CloudFlareScan
+
+          # main.m - 最简单入口
+          cat > main.m << 'EOF'
           #import <UIKit/UIKit.h>
+
           @interface AppDelegate : UIResponder <UIApplicationDelegate>
           @property (strong, nonatomic) UIWindow *window;
           @end
-          EOF
 
-          # AppDelegate.m
-          cat > CloudFlareScan/AppDelegate.m << 'EOF'
-          #import "AppDelegate.h"
-          #import "ViewController.h"
           @implementation AppDelegate
+
           - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
               self.window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-              self.window.rootViewController = [[UINavigationController alloc] initWithRootViewController:[[ViewController alloc] init]];
+              self.window.rootViewController = [[UIViewController alloc] init];
+              self.window.rootViewController.view.backgroundColor = [UIColor colorWithRed:0.06 green:0.08 blue:0.15 alpha:1];
+              self.window.rootViewController.title = @"🚀 优选IP";
+
+              UILabel *label = [[UILabel alloc] init];
+              label.text = @"CloudFlare 优选IP扫描工具\n\n点击扫描按钮开始";
+              label.numberOfLines = 0;
+              label.textAlignment = NSTextAlignmentCenter;
+              label.textColor = [UIColor whiteColor];
+              label.font = [UIFont systemFontOfSize:18];
+              label.frame = CGRectMake(0, 0, 300, 100);
+              label.center = self.window.rootViewController.view.center;
+              [self.window.rootViewController.view addSubview:label];
+
               [self.window makeKeyAndVisible];
               return YES;
           }
+
           @end
+
+          int main(int argc, char * argv[]) {
+              @autoreleasepool {
+                  return UIApplicationMain(argc, argv, nil, @"AppDelegate");
+              }
+          }
           EOF
 
-          # ViewController.h
-          cat > CloudFlareScan/ViewController.h << 'EOF'
-          #import <UIKit/UIKit.h>
-          @interface ViewController : UIViewController <UITableViewDelegate, UITableViewDataSource>
-          @end
-          EOF
+          cd ..
 
-          # ViewController.m
-          cat > CloudFlareScan/ViewController.m << 'EOF'
-          #import "ViewController.h"
-
-          @interface IPInfo : NSObject
-          @property (nonatomic, strong) NSString *ip;
-          @property (nonatomic, assign) NSInteger port;
-          @property (nonatomic, assign) double delay;
-          @property (nonatomic, strong) NSString *country;
-          @property (nonatomic, strong) NSString *colo;
-          @end
-          @implementation IPInfo
-          @end
-
-          @interface ViewController ()
-          @property (nonatomic, strong) NSMutableArray *results;
-          @property (nonatomic, strong) UITextView *inputView;
-          @property (nonatomic, strong) UITableView *tableView;
-          @property (nonatomic, strong) UILabel *statusLabel;
-          @property (nonatomic, strong) UILabel *countLabel;
-          @property (nonatomic, strong) UIButton *scanBtn;
-          @property (nonatomic, strong) UIButton *stopBtn;
-          @property (nonatomic, assign) BOOL isScanning;
-          @property (nonatomic, strong) NSOperationQueue *queue;
-          @end
-
-          @implementation ViewController
-
-          - (void)viewDidLoad {
-              [super viewDidLoad];
-              self.view.backgroundColor = [UIColor colorWithRed:0.06 green:0.08 blue:0.15 alpha:1];
-              self.title = @"🚀 优选IP筛选";
-              self.results = [NSMutableArray array];
-              self.queue = [[NSOperationQueue alloc] init];
-              self.queue.maxConcurrentOperationCount = 100;
-              [self setupUI];
-              [self detectISP];
-          }
-
-          - (void)setupUI {
-              UIScrollView *scroll = [[UIScrollView alloc] init];
-              scroll.translatesAutoresizingMaskIntoConstraints = NO;
-              [self.view addSubview:scroll];
-              [NSLayoutConstraint activateConstraints:@[
-                  [scroll.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
-                  [scroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-                  [scroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-                  [scroll.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor]
-              ]];
-
-              UIView *content = [[UIView alloc] init];
-              content.translatesAutoresizingMaskIntoConstraints = NO;
-              [scroll addSubview:content];
-              [NSLayoutConstraint activateConstraints:@[
-                  [content.topAnchor constraintEqualToAnchor:scroll.topAnchor],
-                  [content.leadingAnchor constraintEqualToAnchor:scroll.leadingAnchor],
-                  [content.trailingAnchor constraintEqualToAnchor:scroll.trailingAnchor],
-                  [content.bottomAnchor constraintEqualToAnchor:scroll.bottomAnchor],
-                  [content.widthAnchor constraintEqualToAnchor:scroll.widthAnchor]
-              ]];
-
-              CGFloat w = self.view.bounds.size.width - 24;
-              CGFloat y = 12;
-
-              self.statusLabel = [[UILabel alloc] init];
-              self.statusLabel.text = @"就绪";
-              self.statusLabel.textColor = [UIColor grayColor];
-              self.statusLabel.font = [UIFont systemFontOfSize:12];
-              self.statusLabel.frame = CGRectMake(12, y, 200, 20);
-              [content addSubview:self.statusLabel];
-
-              UILabel *ispLabel = [[UILabel alloc] init];
-              ispLabel.text = @"📍 检测中...";
-              ispLabel.textColor = [UIColor colorWithRed:0 green:0.78 blue:0.98 alpha:1];
-              ispLabel.font = [UIFont systemFontOfSize:12];
-              ispLabel.textAlignment = NSTextAlignmentRight;
-              ispLabel.tag = 100;
-              ispLabel.frame = CGRectMake(w - 180, y, 180, 20);
-              [content addSubview:ispLabel];
-
-              y += 28;
-              self.countLabel = [[UILabel alloc] init];
-              self.countLabel.text = @"总数: 0  可用: 0";
-              self.countLabel.textColor = [UIColor whiteColor];
-              self.countLabel.font = [UIFont systemFontOfSize:14];
-              self.countLabel.frame = CGRectMake(12, y, w, 24);
-              [content addSubview:self.countLabel];
-              y += 32;
-
-              UIView *inputBg = [[UIView alloc] init];
-              inputBg.backgroundColor = [UIColor colorWithRed:0.10 green:0.13 blue:0.22 alpha:1];
-              inputBg.layer.cornerRadius = 8;
-              inputBg.frame = CGRectMake(12, y, w, 120);
-              [content addSubview:inputBg];
-
-              UILabel *inputLabel = [[UILabel alloc] init];
-              inputLabel.text = @"📂 导入IP (每行一个)";
-              inputLabel.textColor = [UIColor grayColor];
-              inputLabel.font = [UIFont systemFontOfSize:12];
-              inputLabel.frame = CGRectMake(12, 8, 200, 20);
-              [inputBg addSubview:inputLabel];
-
-              self.inputView = [[UITextView alloc] init];
-              self.inputView.backgroundColor = [UIColor colorWithRed:0.06 green:0.08 blue:0.15 alpha:1];
-              self.inputView.textColor = [UIColor whiteColor];
-              self.inputView.font = [UIFont systemFontOfSize:12];
-              self.inputView.layer.cornerRadius = 4;
-              self.inputView.text = @"1.1.1.1\n8.8.8.8\n9.9.9.9";
-              self.inputView.frame = CGRectMake(8, 34, inputBg.bounds.size.width - 16, 76);
-              [inputBg addSubview:self.inputView];
-              y += 128;
-
-              UIView *btnBg = [[UIView alloc] init];
-              btnBg.backgroundColor = [UIColor colorWithRed:0.10 green:0.13 blue:0.22 alpha:1];
-              btnBg.layer.cornerRadius = 8;
-              btnBg.frame = CGRectMake(12, y, w, 50);
-              [content addSubview:btnBg];
-
-              self.scanBtn = [self makeButton:@"▶ 开始" color:[UIColor blueColor] frame:CGRectMake(12, 8, 80, 34)];
-              [self.scanBtn addTarget:self action:@selector(startScan) forControlEvents:UIControlEventTouchUpInside];
-              [btnBg addSubview:self.scanBtn];
-
-              self.stopBtn = [self makeButton:@"⏹ 停止" color:[UIColor redColor] frame:CGRectMake(100, 8, 70, 34)];
-              [self.stopBtn addTarget:self action:@selector(stopScan) forControlEvents:UIControlEventTouchUpInside];
-              self.stopBtn.enabled = NO;
-              [btnBg addSubview:self.stopBtn];
-
-              UIButton *importBtn = [self makeButton:@"📥 导入" color:[UIColor greenColor] frame:CGRectMake(180, 8, 60, 34)];
-              [importBtn addTarget:self action:@selector(importIPs) forControlEvents:UIControlEventTouchUpInside];
-              [btnBg addSubview:importBtn];
-
-              UIButton *copyBtn = [self makeButton:@"📋 复制" color:[UIColor purpleColor] frame:CGRectMake(248, 8, 60, 34)];
-              [copyBtn addTarget:self action:@selector(copyResults) forControlEvents:UIControlEventTouchUpInside];
-              [btnBg addSubview:copyBtn];
-              y += 58;
-
-              UIView *tableBg = [[UIView alloc] init];
-              tableBg.backgroundColor = [UIColor colorWithRed:0.10 green:0.13 blue:0.22 alpha:1];
-              tableBg.layer.cornerRadius = 8;
-              tableBg.frame = CGRectMake(12, y, w, 180);
-              [content addSubview:tableBg];
-
-              UILabel *tableLabel = [[UILabel alloc] init];
-              tableLabel.text = @"📋 可用IP";
-              tableLabel.textColor = [UIColor whiteColor];
-              tableLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-              tableLabel.frame = CGRectMake(12, 8, 200, 22);
-              [tableBg addSubview:tableLabel];
-
-              self.tableView = [[UITableView alloc] init];
-              self.tableView.backgroundColor = [UIColor clearColor];
-              self.tableView.delegate = self;
-              self.tableView.dataSource = self;
-              self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
-              self.tableView.frame = CGRectMake(0, 36, tableBg.bounds.size.width, 140);
-              [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:@"Cell"];
-              [tableBg addSubview:self.tableView];
-              y += 188;
-
-              UIView *outBg = [[UIView alloc] init];
-              outBg.backgroundColor = [UIColor colorWithRed:0.10 green:0.13 blue:0.22 alpha:1];
-              outBg.layer.cornerRadius = 8;
-              outBg.frame = CGRectMake(12, y, w, 120);
-              [content addSubview:outBg];
-
-              UILabel *outLabel = [[UILabel alloc] init];
-              outLabel.text = @"📝 输出";
-              outLabel.textColor = [UIColor grayColor];
-              outLabel.font = [UIFont systemFontOfSize:12];
-              outLabel.frame = CGRectMake(12, 8, 200, 20);
-              [outBg addSubview:outLabel];
-
-              UITextView *outView = [[UITextView alloc] init];
-              outView.backgroundColor = [UIColor colorWithRed:0.06 green:0.08 blue:0.15 alpha:1];
-              outView.textColor = [UIColor grayColor];
-              outView.font = [UIFont systemFontOfSize:11];
-              outView.layer.cornerRadius = 4;
-              outView.tag = 200;
-              outView.frame = CGRectMake(8, 34, outBg.bounds.size.width - 16, 76);
-              [outBg addSubview:outView];
-              y += 128;
-
-              content.frame = CGRectMake(0, 0, self.view.bounds.size.width, y + 20);
-              scroll.contentSize = content.frame.size;
-          }
-
-          - (UIButton *)makeButton:(NSString *)title color:(UIColor *)color frame:(CGRect)frame {
-              UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
-              [btn setTitle:title forState:UIControlStateNormal];
-              [btn setTitleColor:color forState:UIControlStateNormal];
-              btn.titleLabel.font = [UIFont systemFontOfSize:13];
-              btn.backgroundColor = [color colorWithAlphaComponent:0.15];
-              btn.layer.cornerRadius = 6;
-              btn.frame = frame;
-              return btn;
-          }
-
-          - (void)detectISP {
-              NSURL *url = [NSURL URLWithString:@"http://ip-api.com/json/?fields=isp"];
-              [[[NSURLSession sharedSession] dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-                  if (data) {
-                      NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-                      if (json[@"isp"]) {
-                          dispatch_async(dispatch_get_main_queue(), ^{
-                              UILabel *l = [self.view viewWithTag:100];
-                              l.text = [NSString stringWithFormat:@"📍 %@", json[@"isp"]];
-                          });
-                      }
-                  }
-              }] resume];
-          }
-
-          - (void)importIPs {
-              [self.results removeAllObjects];
-              [self.tableView reloadData];
-              self.statusLabel.text = @"已导入";
-              self.countLabel.text = @"总数: 0  可用: 0";
-              [self.view endEditing:YES];
-          }
-
-          - (void)startScan {
-              NSString *text = self.inputView.text;
-              NSArray *lines = [text componentsSeparatedByString:@"\n"];
-              NSMutableArray *ips = [NSMutableArray array];
-
-              for (NSString *line in lines) {
-                  NSString *trim = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-                  if (trim.length == 0) continue;
-                  NSArray *parts = [trim componentsSeparatedByString:@":"];
-                  NSString *ip = parts.firstObject;
-                  NSInteger port = 443;
-                  if (parts.count > 1) port = [parts[1] integerValue];
-                  if (port == 0) port = 443;
-                  if ([ip containsString:@"."]) {
-                      IPInfo *info = [[IPInfo alloc] init];
-                      info.ip = ip;
-                      info.port = port;
-                      [ips addObject:info];
-                  }
-              }
-
-              if (ips.count == 0) {
-                  self.statusLabel.text = @"请导入有效IP";
-                  return;
-              }
-
-              [self.results removeAllObjects];
-              self.isScanning = YES;
-              self.scanBtn.enabled = NO;
-              self.stopBtn.enabled = YES;
-              self.statusLabel.text = @"扫描中...";
-
-              NSMutableArray *allResults = [NSMutableArray array];
-              NSLock *lock = [[NSLock alloc] init];
-              dispatch_group_t group = dispatch_group_create();
-              dispatch_semaphore_t sem = dispatch_semaphore_create(100);
-
-              for (IPInfo *info in ips) {
-                  dispatch_group_enter(group);
-                  dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
-                  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-                      [self checkIP:info completion:^(IPInfo *result) {
-                          [lock lock];
-                          if (result) [allResults addObject:result];
-                          [lock unlock];
-                          dispatch_semaphore_signal(sem);
-                          dispatch_group_leave(group);
-
-                          dispatch_async(dispatch_get_main_queue(), ^{
-                              self.results = [allResults mutableCopy];
-                              [self updateUI];
-                          });
-                      }];
-                  });
-              }
-
-              dispatch_group_notify(group, dispatch_get_main_queue(), ^{
-                  self.isScanning = NO;
-                  self.scanBtn.enabled = YES;
-                  self.stopBtn.enabled = NO;
-                  self.statusLabel.text = [NSString stringWithFormat:@"✅ 完成！共 %lu 个", (unsigned long)self.results.count];
-                  [self updateUI];
-              });
-          }
-
-          - (void)checkIP:(IPInfo *)info completion:(void(^)(IPInfo *))completion {
-              NSString *urlStr = [NSString stringWithFormat:@"https://%@:%ld/cdn-cgi/trace", info.ip, (long)info.port];
-              NSURL *url = [NSURL URLWithString:urlStr];
-              NSDate *start = [NSDate date];
-
-              NSURLSessionConfiguration *cfg = [NSURLSessionConfiguration defaultSessionConfiguration];
-              cfg.timeoutIntervalForRequest = 3;
-              NSURLSession *session = [NSURLSession sessionWithConfiguration:cfg];
-
-              [[session dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-                  if (data) {
-                      NSHTTPURLResponse *http = (NSHTTPURLResponse *)response;
-                      if (http.statusCode == 200) {
-                          double delay = [[NSDate date] timeIntervalSinceDate:start] * 1000;
-                          NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-                          NSString *colo = @"";
-                          for (NSString *line in [text componentsSeparatedByString:@"\n"]) {
-                              if ([line hasPrefix:@"colo="]) {
-                                  colo = [line substringFromIndex:5];
-                                  break;
-                              }
-                          }
-
-                          IPInfo *result = [[IPInfo alloc] init];
-                          result.ip = info.ip;
-                          result.port = info.port;
-                          result.delay = delay;
-                          result.colo = colo;
-
-                          NSString *locUrl = [NSString stringWithFormat:@"http://ip-api.com/json/%@?fields=country", info.ip];
-                          [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:locUrl] completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
-                              if (d) {
-                                  NSDictionary *json = [NSJSONSerialization JSONObjectWithData:d options:0 error:nil];
-                                  result.country = json[@"country"] ?: @"";
-                              }
-                              completion(result);
-                          }] resume];
-                          return;
-                      }
-                  }
-                  completion(nil);
-              }] resume];
-          }
-
-          - (void)stopScan {
-              self.isScanning = NO;
-              self.scanBtn.enabled = YES;
-              self.stopBtn.enabled = NO;
-              self.statusLabel.text = @"已停止";
-              [self.queue cancelAllOperations];
-          }
-
-          - (void)updateUI {
-              self.countLabel.text = [NSString stringWithFormat:@"总数: %lu  可用: %lu",
-                                      (unsigned long)(self.inputView.text componentsSeparatedByString:@"\n").count,
-                                      (unsigned long)self.results.count];
-              [self.tableView reloadData];
-
-              NSMutableString *outText = [NSMutableString string];
-              for (IPInfo *info in self.results) {
-                  [outText appendFormat:@"%@:%ld  [%.0fms]  %@  %@\n", info.ip, (long)info.port, info.delay, info.country, info.colo];
-              }
-              UITextView *outView = [self.view viewWithTag:200];
-              outView.text = outText.length > 0 ? outText : @"暂无数据";
-              outView.textColor = outText.length > 0 ? [UIColor whiteColor] : [UIColor grayColor];
-          }
-
-          - (void)copyResults {
-              NSMutableString *text = [NSMutableString string];
-              for (IPInfo *info in self.results) {
-                  [text appendFormat:@"%@:%ld\n", info.ip, (long)info.port];
-              }
-              if (text.length > 0) {
-                  [UIPasteboard generalPasteboard].string = text;
-                  self.statusLabel.text = @"✅ 已复制";
-              }
-          }
-
-          - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-              return self.results.count;
-          }
-
-          - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-              UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"Cell" forIndexPath:indexPath];
-              cell.backgroundColor = [UIColor clearColor];
-              cell.textLabel.textColor = [UIColor whiteColor];
-              cell.textLabel.font = [UIFont systemFontOfSize:12];
-
-              IPInfo *info = self.results[indexPath.row];
-              NSString *colo = info.colo.length > 0 ? [NSString stringWithFormat:@"🏢%@", info.colo] : @"";
-              cell.textLabel.text = [NSString stringWithFormat:@"%@:%ld  [%.0fms]  %@  %@", info.ip, (long)info.port, info.delay, info.country, colo];
-              return cell;
-          }
-
-          - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
-              return 30;
-          }
-
-          @end
-          EOF
-
-      - name: Create Xcode Project
+      - name: Create Xcode Project with xcodegen
         run: |
-          cat > CloudFlareScan.xcodeproj/project.pbxproj << 'EOF'
-          // !$*UTF8*$!
-          {
-              archiveVersion = 1;
-              classes = {};
-              objectVersion = 56;
-              objects = {
-                  P100000001 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = P100000002 /* AppDelegate.m */; };
-                  P100000003 /* ViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = P100000004 /* ViewController.m */; };
-                  P100000002 /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
-                  P100000003 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
-                  P100000004 /* ViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ViewController.m; sourceTree = "<group>"; };
-                  P100000005 /* ViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ViewController.h; sourceTree = "<group>"; };
-                  P100000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-                  P100000007 /* CloudFlareScan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CloudFlareScan.app; sourceTree = BUILT_PRODUCTS_DIR; };
-                  P100000008 = {isa = PBXGroup; children = (P100000009, P100000010,); sourceTree = "<group>"; };
-                  P100000009 /* CloudFlareScan */ = {isa = PBXGroup; children = (P100000003, P100000002, P100000005, P100000004, P100000006,); path = CloudFlareScan; sourceTree = "<group>"; };
-                  P100000010 /* Products */ = {isa = PBXGroup; children = (P100000007,); name = Products; sourceTree = "<group>"; };
-                  P100000011 /* CloudFlareScan */ = {isa = PBXNativeTarget; buildConfigurationList = P100000012; buildPhases = (P100000013, P100000014,); buildRules = (); dependencies = (); name = CloudFlareScan; productName = CloudFlareScan; productReference = P100000007; productType = "com.apple.product-type.application"; };
-                  P100000015 /* Project object */ = {isa = PBXProject; attributes = {LastSwiftUpdateCheck = 1500; LastUpgradeCheck = 1500; TargetAttributes = {P100000011 = {CreatedOnToolsVersion = 15.0;};};}; buildConfigurationList = P100000016; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base,); mainGroup = P100000008; productRefGroup = P100000010; projectDirPath = ""; projectRoot = ""; targets = (P100000011,); };
-                  P100000014 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-                  P100000013 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (P100000001, P100000003,); runOnlyForDeploymentPostprocessing = 0; };
-                  P100000017 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
-                  P100000018 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
-                  P100000019 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; INFOPLIST_FILE = CloudFlareScan/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Debug; };
-                  P100000020 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; INFOPLIST_FILE = CloudFlareScan/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios; PRODUCT_NAME = CloudFlareScan; CODE_SIGN_IDENTITY = ""; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;}; name = Release; };
-                  P100000012 = {isa = XCConfigurationList; buildConfigurations = (P100000019, P100000020,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-                  P100000016 = {isa = XCConfigurationList; buildConfigurations = (P100000017, P100000018,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-              };
-              rootObject = P100000015;
-          }
+          # 安装 xcodegen
+          brew install xcodegen
+
+          # 创建 project.yml
+          cat > project.yml << 'EOF'
+          name: CloudFlareScan
+          targets:
+            CloudFlareScan:
+              type: application
+              platform: iOS
+              deploymentTarget: "15.0"
+              sources: 
+                - CloudFlareScan/main.m
+              settings:
+                base:
+                  PRODUCT_BUNDLE_IDENTIFIER: com.cloudflarescan.ios
+                  CODE_SIGN_IDENTITY: ""
+                  CODE_SIGNING_REQUIRED: NO
+                  CODE_SIGNING_ALLOWED: NO
+                  DEVELOPMENT_TEAM: ""
+                  INFOPLIST_FILE: CloudFlareScan/Info.plist
+                  GENERATE_INFOPLIST_FILE: NO
           EOF
 
-          # 验证文件存在
+          # 生成项目
+          xcodegen generate
+
+          # 验证
           ls -la CloudFlareScan.xcodeproj/
 
       - name: Build App
@@ -542,11 +166,13 @@ jobs:
           if [ -z "$APP_PATH" ]; then
             APP_PATH=$(find build -name "*.app" -type d 2>/dev/null | head -1)
           fi
+
           if [ -z "$APP_PATH" ]; then
             echo "❌ 未找到 .app 文件"
             find . -name "*.app" -type d 2>/dev/null
             exit 1
           fi
+
           echo "✅ 找到: $APP_PATH"
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
