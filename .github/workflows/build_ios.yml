@@ -20,74 +20,43 @@ jobs:
           sudo xcode-select -switch /Applications/Xcode.app/Contents/Developer
           xcodebuild -version
 
-      - name: Create iOS App
+      - name: Create Swift Package
         run: |
-          mkdir -p CloudFlareScan
-          mkdir -p CloudFlareScan.xcodeproj
+          mkdir -p MyApp/Sources/MyApp
+          cd MyApp
 
-          # Info.plist
-          cat > CloudFlareScan/Info.plist << 'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleDevelopmentRegion</key>
-              <string>zh_CN</string>
-              <key>CFBundleExecutable</key>
-              <string>CloudFlareScan</string>
-              <key>CFBundleIdentifier</key>
-              <string>com.cloudflarescan.ios</string>
-              <key>CFBundleInfoDictionaryVersion</key>
-              <string>6.0</string>
-              <key>CFBundleName</key>
-              <string>优选IP筛选</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-              <key>CFBundleShortVersionString</key>
-              <string>1.0</string>
-              <key>CFBundleVersion</key>
-              <string>1</string>
-              <key>LSRequiresIPhoneOS</key>
-              <true/>
-              <key>NSAppTransportSecurity</key>
-              <dict>
-                  <key>NSAllowsArbitraryLoads</key>
-                  <true/>
-              </dict>
-              <key>UILaunchScreen</key>
-              <dict/>
-              <key>UIRequiredDeviceCapabilities</key>
-              <array>
-                  <string>armv7</string>
-              </array>
-              <key>UISupportedInterfaceOrientations</key>
-              <array>
-                  <string>UIInterfaceOrientationPortrait</string>
-              </array>
-          </dict>
-          </plist>
+          cat > Package.swift << 'EOF'
+          // swift-tools-version:5.9
+          import PackageDescription
+
+          let package = Package(
+              name: "MyApp",
+              platforms: [
+                  .iOS(.v15)
+              ],
+              products: [
+                  .executable(name: "MyApp", targets: ["MyApp"])
+              ],
+              targets: [
+                  .executableTarget(
+                      name: "MyApp",
+                      path: "Sources/MyApp"
+                  )
+              ]
+          )
           EOF
 
-      - name: Create Swift Source Files
+          cd ..
+
+      - name: Create Source Files
         run: |
-          # App.swift
-          cat > CloudFlareScan/App.swift << 'EOF'
+          cd MyApp/Sources/MyApp
+
+          cat > main.swift << 'EOF'
           import SwiftUI
+          import UIKit
 
-          @main
-          struct CloudFlareScanApp: App {
-              var body: some Scene {
-                  WindowGroup {
-                      ContentView()
-                  }
-              }
-          }
-          EOF
-
-          # ContentView.swift
-          cat > CloudFlareScan/ContentView.swift << 'EOF'
-          import SwiftUI
-
+          // ===== 数据模型 =====
           struct IPItem: Identifiable {
               let id = UUID()
               var ip: String
@@ -98,6 +67,7 @@ jobs:
               var isp: String
           }
 
+          // ===== 扫描管理器 =====
           class ScanManager: ObservableObject {
               @Published var results: [IPItem] = []
               @Published var isScanning = false
@@ -253,7 +223,7 @@ jobs:
               func copyIPs() {
                   let text = filteredResults.map { "\($0.ip):\($0.port)" }.joined(separator: "\n")
                   UIPasteboard.general.string = text
-                  statusText = "✅ 已复制IP"
+                  statusText = "✅ 已复制"
               }
 
               func copyDetails() {
@@ -266,8 +236,8 @@ jobs:
                   var text = "# 优选IP报告\n"
                   text += "# 运营商: \(detectedISP)\n"
                   text += "# 可用IP: \(availableCount)\n"
-                  text += "# 最佳延迟: \(String(format: "%.0f", bestDelay))ms\n"
-                  text += "# 平均延迟: \(String(format: "%.0f", avgDelay))ms\n\n"
+                  text += "# 最佳: \(String(format: "%.0f", bestDelay))ms\n"
+                  text += "# 平均: \(String(format: "%.0f", avgDelay))ms\n\n"
                   text += filteredResults.map { "\($0.ip):\($0.port)  [\(String(format: "%.0f", $0.delay))ms]  \($0.country)  \($0.colo)" }.joined(separator: "\n")
                   UIPasteboard.general.string = text
                   statusText = "✅ 已复制报告"
@@ -284,6 +254,7 @@ jobs:
               }
           }
 
+          // ===== 主视图 =====
           struct ContentView: View {
               @StateObject private var manager = ScanManager()
               @State private var alertMsg = ""
@@ -293,9 +264,8 @@ jobs:
                       Color(red: 0.06, green: 0.08, blue: 0.15).ignoresSafeArea()
 
                       VStack(spacing: 0) {
-                          // 标题
                           HStack {
-                              Text("🚀 优选IP筛选工具")
+                              Text("🚀 优选IP筛选")
                                   .font(.title2)
                                   .fontWeight(.bold)
                                   .foregroundColor(.white)
@@ -307,7 +277,6 @@ jobs:
                           .padding(.horizontal)
                           .padding(.top, 12)
 
-                          // 统计
                           HStack(spacing: 12) {
                               VStack { Text("可用").font(.caption2).foregroundColor(.gray); Text("\(manager.availableCount)").foregroundColor(.green) }
                               VStack { Text("最佳").font(.caption2).foregroundColor(.gray); Text(manager.bestDelay > 0 ? String(format: "%.0fms", manager.bestDelay) : "--").foregroundColor(.orange) }
@@ -321,40 +290,33 @@ jobs:
                           .cornerRadius(8)
                           .padding(.horizontal)
 
-                          // 导入
                           VStack(alignment: .leading, spacing: 4) {
-                              Text("📂 导入IP (每行一个，支持 IP 或 IP:端口)").font(.caption).foregroundColor(.gray)
+                              Text("📂 导入IP (每行一个)").font(.caption).foregroundColor(.gray)
                               TextEditor(text: $manager.inputText)
                                   .font(.system(.caption, design: .monospaced))
                                   .foregroundColor(.white)
                                   .frame(height: 70)
                                   .background(Color(red: 0.06, green: 0.08, blue: 0.15))
                                   .cornerRadius(6)
-                                  .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.2), lineWidth: 0.5))
                           }
                           .padding(.horizontal)
                           .padding(.top, 8)
 
-                          // 按钮
                           HStack(spacing: 8) {
-                              Button("▶ 开始扫描") {
-                                  manager.startScan()
-                              }
-                              .buttonStyle(.borderedProminent)
-                              .font(.caption)
-                              .disabled(manager.isScanning)
+                              Button("▶ 开始") { manager.startScan() }
+                                  .buttonStyle(.borderedProminent)
+                                  .font(.caption)
+                                  .disabled(manager.isScanning)
 
-                              Button("⏹ 停止") {
-                                  manager.stopScan()
-                              }
-                              .buttonStyle(.bordered)
-                              .font(.caption)
-                              .disabled(!manager.isScanning)
+                              Button("⏹ 停止") { manager.stopScan() }
+                                  .buttonStyle(.bordered)
+                                  .font(.caption)
+                                  .disabled(!manager.isScanning)
 
                               Menu {
-                                  Button("复制IP") { manager.copyIPs(); alertMsg = "已复制IP" }
+                                  Button("复制IP") { manager.copyIPs(); alertMsg = "已复制" }
                                   Button("复制详情") { manager.copyDetails(); alertMsg = "已复制详情" }
-                                  Button("复制完整报告") { manager.copyReport(); alertMsg = "已复制报告" }
+                                  Button("复制报告") { manager.copyReport(); alertMsg = "已复制报告" }
                                   Button("导出IP") { manager.exportIPs(); alertMsg = "已导出" }
                               } label: {
                                   Label("📋", systemImage: "doc.on.doc")
@@ -381,25 +343,17 @@ jobs:
                           .padding(.horizontal)
                           .padding(.vertical, 6)
 
-                          // 筛选
                           HStack {
-                              Text("🔍 地区:")
-                                  .font(.caption2)
-                                  .foregroundColor(.gray)
+                              Text("🔍 地区:").font(.caption2).foregroundColor(.gray)
                               TextField("过滤地区", text: $manager.filterText)
                                   .textFieldStyle(.roundedBorder)
                                   .font(.caption)
                                   .frame(width: 100)
-
-                              Text("端口:")
-                                  .font(.caption2)
-                                  .foregroundColor(.gray)
-                                  .padding(.leading, 8)
+                              Text("端口:").font(.caption2).foregroundColor(.gray).padding(.leading, 8)
                               TextField("过滤端口", text: $manager.filterPort)
                                   .textFieldStyle(.roundedBorder)
                                   .font(.caption)
                                   .frame(width: 60)
-
                               Spacer()
                               Text("显示 \(manager.filteredResults.count) 个")
                                   .font(.caption2)
@@ -408,44 +362,30 @@ jobs:
                           .padding(.horizontal)
                           .padding(.vertical, 4)
 
-                          // 列表
                           List(manager.filteredResults) { ip in
                               HStack {
-                                  Text(ip.ip)
-                                      .font(.system(.caption, design: .monospaced))
-                                      .foregroundColor(.white)
-                                  Text(":\(ip.port)")
-                                      .font(.caption2)
-                                      .foregroundColor(.gray)
+                                  Text(ip.ip).font(.system(.caption, design: .monospaced)).foregroundColor(.white)
+                                  Text(":\(ip.port)").font(.caption2).foregroundColor(.gray)
                                   Spacer()
                                   Text("\(String(format: "%.0f", ip.delay))ms")
-                                      .font(.caption)
-                                      .fontWeight(.bold)
+                                      .font(.caption).fontWeight(.bold)
                                       .foregroundColor(ip.delay < 50 ? .green : ip.delay < 100 ? .orange : .red)
-                                  if !ip.colo.isEmpty {
-                                      Text("🏢\(ip.colo)")
-                                          .font(.caption2)
-                                          .foregroundColor(.blue)
-                                  }
-                                  Text("📍\(ip.country)")
-                                      .font(.caption2)
-                                      .foregroundColor(.gray)
+                                  if !ip.colo.isEmpty { Text("🏢\(ip.colo)").font(.caption2).foregroundColor(.blue) }
+                                  Text("📍\(ip.country)").font(.caption2).foregroundColor(.gray)
                               }
                               .padding(.vertical, 2)
                           }
                           .listStyle(.plain)
                           .scrollContentBackground(.hidden)
 
-                          // 输出
                           VStack(alignment: .leading, spacing: 4) {
-                              Text("📝 输出文本").font(.caption).foregroundColor(.gray)
+                              Text("📝 输出").font(.caption).foregroundColor(.gray)
                               TextEditor(text: .constant(manager.outputText))
                                   .font(.system(.caption, design: .monospaced))
                                   .foregroundColor(.white)
                                   .frame(height: 60)
                                   .background(Color(red: 0.06, green: 0.08, blue: 0.15))
                                   .cornerRadius(6)
-                                  .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.2), lineWidth: 0.5))
                           }
                           .padding(.horizontal)
                           .padding(.bottom, 8)
@@ -456,71 +396,71 @@ jobs:
                   }
                   .onAppear {
                       manager.detectISP()
-                      manager.inputText = "1.1.1.1\n8.8.8.8\n9.9.9.9\n104.16.0.0\n104.16.1.0"
+                      manager.inputText = "1.1.1.1\n8.8.8.8\n9.9.9.9\n104.16.0.0"
+                  }
+              }
+          }
+
+          // ===== App 入口 =====
+          @main
+          struct MyApp: App {
+              var body: some Scene {
+                  WindowGroup {
+                      ContentView()
                   }
               }
           }
           EOF
 
-      - name: Create Xcode Project with xcodegen
-        run: |
-          brew install xcodegen
+          cd ../../..
 
-          cat > project.yml << 'EOF'
-          name: CloudFlareScan
-          targets:
-            CloudFlareScan:
-              type: application
-              platform: iOS
-              deploymentTarget: "15.0"
-              sources: [CloudFlareScan]
-              settings:
-                base:
-                  PRODUCT_BUNDLE_IDENTIFIER: com.cloudflarescan.ios
-                  CODE_SIGN_IDENTITY: ""
-                  CODE_SIGNING_REQUIRED: NO
-                  CODE_SIGNING_ALLOWED: NO
-                  DEVELOPMENT_TEAM: ""
-                  INFOPLIST_FILE: CloudFlareScan/Info.plist
-                  GENERATE_INFOPLIST_FILE: NO
+      - name: Build with SwiftPM
+        run: |
+          cd MyApp
+          swift build -c release --arch arm64 --static-swift-stdlib
+
+      - name: Package as IPA
+        run: |
+          cd MyApp
+          mkdir -p Payload/MyApp.app
+          cp .build/arm64-apple-ios/release/MyApp Payload/MyApp.app/
+          cp Sources/MyApp/Info.plist Payload/MyApp.app/ 2>/dev/null || echo "无Info.plist"
+          
+          cat > Payload/MyApp.app/Info.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleDevelopmentRegion</key>
+              <string>zh_CN</string>
+              <key>CFBundleExecutable</key>
+              <string>MyApp</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.myapp.ios</string>
+              <key>CFBundleInfoDictionaryVersion</key>
+              <string>6.0</string>
+              <key>CFBundleName</key>
+              <string>优选IP筛选</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>1.0</string>
+              <key>CFBundleVersion</key>
+              <string>1</string>
+              <key>LSRequiresIPhoneOS</key>
+              <true/>
+              <key>NSAppTransportSecurity</key>
+              <dict>
+                  <key>NSAllowsArbitraryLoads</key>
+                  <true/>
+              </dict>
+          </dict>
+          </plist>
           EOF
 
-          xcodegen generate
-
-          ls -la CloudFlareScan.xcodeproj/
-
-      - name: Build App
-        run: |
-          xcodebuild -project CloudFlareScan.xcodeproj \
-            -scheme CloudFlareScan \
-            -configuration Release \
-            -derivedDataPath build \
-            -sdk iphoneos \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            ONLY_ACTIVE_ARCH=NO \
-            -arch arm64
-
-      - name: Package IPA
-        run: |
-          APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" -type d 2>/dev/null | head -1)
-          if [ -z "$APP_PATH" ]; then
-            APP_PATH=$(find build -name "*.app" -type d 2>/dev/null | head -1)
-          fi
-
-          if [ -z "$APP_PATH" ]; then
-            echo "❌ 未找到 .app 文件"
-            find . -name "*.app" -type d 2>/dev/null
-            exit 1
-          fi
-
-          echo "✅ 找到: $APP_PATH"
-          mkdir -p Payload
-          cp -R "$APP_PATH" Payload/
-          zip -r CloudFlareScan.ipa Payload
-          cp CloudFlareScan.ipa CloudFlareScan.tipa
-          ls -la *.ipa *.tipa
+          zip -r ../CloudFlareScan.ipa Payload
+          cp ../CloudFlareScan.ipa ../CloudFlareScan.tipa
+          cd ..
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
