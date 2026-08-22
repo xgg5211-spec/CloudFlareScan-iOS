@@ -1,15 +1,12 @@
-加完整打包步骤，生成 IPA：
-
-```yaml
-name: IPSelector Build
+name: 构建IP优选工具
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 4 * * *'
+  push:
+    branches: [main]
 
 permissions:
- contents: write
+  contents: write
 
 jobs:
   build:
@@ -17,12 +14,13 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - name: 克隆代码
+        uses: actions/checkout@v4
 
-      - name: Install zsign
+      - name: 安装工具
         run: brew install zsign
 
-      - name: Generate Swift App
+      - name: 生成Swift应用
         run: |
           mkdir -p IPSelector
           cat > IPSelector/Info.plist << 'EOF'
@@ -47,6 +45,7 @@ jobs:
           cat > IPSelector/ContentView.swift << 'EOF'
           import SwiftUI
           import Foundation
+          
           struct ContentView: View {
               @StateObject var vm = ProxyVM()
               var body: some View {
@@ -70,15 +69,15 @@ jobs:
           }
           EOF
 
-      - name: Create Xcode Project
+      - name: 创建Xcode项目
         run: |
-          xcodebuild -create-xcodeproj \
+          xcodebuild create-xcodeproj \
             -project IPSelector.xcodeproj \
             -scheme IPSelector \
             -destination "generic/platform=iOS" \
             CODE_SIGNING_ALLOWED=NO
 
-      - name: Build .app
+      - name: 编译应用
         run: |
           xcodebuild build \
             -project IPSelector.xcodeproj \
@@ -87,13 +86,13 @@ jobs:
             -destination "generic/platform=iOS" \
             CODE_SIGNING_ALLOWED=NO
 
-      - name: Package IPA
+      - name: 打包IPA
         run: |
           mkdir -p Payload
           cp -r build/Release-iphoneos/IPSelector.app Payload/
           zip -r IPSelector.ipa Payload
 
-      - name: Sign IPA
+      - name: 签名IPA
         run: |
           openssl req -newkey rsa:2048 -nodes -keyout key.pem -x509 -days 3650 -out cert.pem \
             -subj "/CN=IPSelector"
@@ -101,11 +100,10 @@ jobs:
           zsign -k key.pem -c cert.pem -p cert.p12 -P "" -b com.ipselector.tool \
             -n IPSelector -o IPSelector-signed.ipa IPSelector.ipa
 
-      - name: Upload Release
+      - name: 上传Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: "IPSelector v2.0"
+          name: "IP优选 v2.0"
           files: IPSelector-signed.ipa
           prerelease: true
-```
