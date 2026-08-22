@@ -1,6 +1,3 @@
-
-
-```yaml
 name: IPSelector Build
 
 on:
@@ -50,115 +47,23 @@ jobs:
           
           struct ContentView: View {
               @StateObject var vm = ProxyVM()
-              @State private var showScanner = false
-              
               var body: some View {
                   NavigationStack {
-                      ScrollView {
-                          VStack(spacing: 20) {
-                              headerView
-                              statsView
-                              inputSection
-                              resultsSection
-                          }
-                          .padding()
-                      }
-                      .background(Color.black)
-                      .navigationTitle("IP优选 v2.0")
-                      .toolbar {
-                          ToolbarItem(placement: .topBarTrailing) {
-                              Button { showScanner.toggle() } label: {
-                                  Image(systemName: "scanner.line.dashed")
+                      List(vm.nodes) { node in
+                          HStack {
+                              VStack(alignment: .leading) {
+                                  Text(node.name).foregroundStyle(.white)
+                                  Text("\(node.ip):\(node.port)").font(.caption).foregroundStyle(.gray)
+                              }
+                              Spacer()
+                              Text("\(node.latency)ms").foregroundStyle(node.latency < 200 ? .green : .orange)
+                              Button(action: { UIPasteboard.general.string = "\(node.ip):\(node.port)" }) {
+                                  Image(systemName: "square.on.square").foregroundStyle(.cyan)
                               }
                           }
                       }
+                      .navigationTitle("IP优选")
                   }
-              }
-              
-              private var headerView: some View {
-                  VStack(spacing: 12) {
-                      Text("◈ IP PROXY SELECTOR ◈")
-                          .font(.system(size: 24, weight: .bold, design: .monospace))
-                          .foregroundStyle(.cyan)
-                      Text("TLS 握手 | 真连接测速 | 归属地识别")
-                          .font(.caption)
-                          .foregroundStyle(.green.opacity(0.8))
-                          .frame(maxWidth: .infinity)
-                  }
-                  .padding()
-                  .background(
-                      RoundedRectangle(cornerRadius: 16)
-                          .fill(Color(red: 0.05, green: 0.1, blue: 0.15))
-                          .shadow(color: .cyan.opacity(0.3), radius: 10)
-                  )
-              }
-              
-              private var statsView: some View {
-                  HStack(spacing: 15) {
-                      StatCard(label: "总节点", value: "\(vm.nodes.count)", color: .cyan)
-                      StatCard(label: "已优选", value: "\(vm.goodNodes.count)", color: .green)
-                      StatCard(label: "平均延迟", value: "\(vm.avgLatency)ms", color: .orange)
-                  }
-              }
-              
-              private var inputSection: some View {
-                  VStack(alignment: .leading, spacing: 12) {
-                      Text("批量导入 IP")
-                          .font(.headline)
-                          .foregroundStyle(.gray)
-                      TextEditor(text: $vm.inputText)
-                          .font(.system(.body, design: .monospace))
-                          .frame(height: 120)
-                          .background(Color(red: 0.1, green: 0.1, blue: 0.15))
-                          .cornerRadius(12)
-                      HStack {
-                          Button("开始扫描") { Task { await vm.scan() } }
-                              .buttonStyle(.borderedProminent)
-                              .tint(.cyan)
-                              .disabled(vm.scanning)
-                          Button("清空") { vm.clear() }
-                              .buttonStyle(.border)
-                          Button("粘贴") { vm.pasteFromClipboard() }
-                              .buttonStyle(.border)
-                      }
-                      if vm.scanning { ProgressView() }
-                  }
-                  .padding()
-                  .background(RoundedRectangle(cornerRadius: 16).fill(Color(red: 0.05, green: 0.1, blue: 0.15)))
-              }
-              
-              private var resultsSection: some View {
-                  VStack(alignment: .leading, spacing: 8) {
-                      HStack {
-                          Text("扫描结果 (\(vm.nodes.count))")
-                              .font(.headline)
-                              .foregroundStyle(.cyan)
-                          Spacer()
-                          Button("复制全部") {
-                              let good = vm.goodNodes.map { "\($0.ip):\($0.port)" }.joined(separator: "\n")
-                              UIPasteboard.general.string = good
-                          }
-                          .font(.caption)
-                          .foregroundStyle(.green)
-                      }
-                      LazyVStack(spacing: 8) {
-                          ForEach(vm.displayedNodes) { node in NodeRow(node: node) }
-                      }
-                      .frame(maxHeight: 400)
-                  }
-                  .padding()
-                  .background(RoundedRectangle(cornerRadius: 16).fill(Color(red: 0.05, green: 0.1, blue: 0.15)))
               }
           }
-          
-          struct StatCard: View {
-              let label, value: String
-              let color: Color
-              var body: some View {
-                  VStack(spacing: 4) {
-                      Text(value).font(.system(size: 24, weight: .bold, design: .monospace)).foregroundStyle(color)
-                      Text(label).font(.caption2).foregroundStyle(.gray)
-                  }
-                  .frame(maxWidth: .infinity)
-                  .padding()
-                  .background(RoundedRectangle(cornerRadius: 12).fill(Color(red
+          EOF
