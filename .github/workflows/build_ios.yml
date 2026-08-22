@@ -10,8 +10,6 @@ on:
         type: string
   push:
     branches: [ main, master ]
-  schedule:
-    - cron: '0 */6 * * *'
 
 jobs:
   build:
@@ -27,6 +25,700 @@ jobs:
         run: |
           sudo xcode-select -switch /Applications/Xcode.app/Contents/Developer
           xcodebuild -version
+
+      - name: Create Xcode Project
+        run: |
+          # 创建项目目录
+          mkdir -p CloudFlareScan
+          mkdir -p CloudFlareScan.xcodeproj
+          
+          # 生成 Info.plist
+          cat > CloudFlareScan/Info.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleDevelopmentRegion</key>
+              <string>$(DEVELOPMENT_LANGUAGE)</string>
+              <key>CFBundleExecutable</key>
+              <string>$(EXECUTABLE_NAME)</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.cloudflarescan.ios</string>
+              <key>CFBundleInfoDictionaryVersion</key>
+              <string>6.0</string>
+              <key>CFBundleName</key>
+              <string>$(PRODUCT_NAME)</string>
+              <key>CFBundlePackageType</key>
+              <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+              <key>CFBundleShortVersionString</key>
+              <string>1.0</string>
+              <key>CFBundleVersion</key>
+              <string>1</string>
+              <key>LSRequiresIPhoneOS</key>
+              <true/>
+              <key>NSAppTransportSecurity</key>
+              <dict>
+                  <key>NSAllowsArbitraryLoads</key>
+                  <true/>
+              </dict>
+              <key>UIApplicationSceneManifest</key>
+              <dict>
+                  <key>UIApplicationSupportsMultipleScenes</key>
+                  <false/>
+              </dict>
+              <key>UILaunchScreen</key>
+              <dict/>
+              <key>UIRequiredDeviceCapabilities</key>
+              <array>
+                  <string>armv7</string>
+              </array>
+              <key>UISupportedInterfaceOrientations</key>
+              <array>
+                  <string>UIInterfaceOrientationPortrait</string>
+              </array>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Create Swift Source Files
+        run: |
+          # AppDelegate.swift
+          cat > CloudFlareScan/AppDelegate.swift << 'EOF'
+          import UIKit
+          import SwiftUI
+
+          @main
+          class AppDelegate: UIResponder, UIApplicationDelegate {
+              var window: UIWindow?
+
+              func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+                  let window = UIWindow(frame: UIScreen.main.bounds)
+                  window.rootViewController = UIHostingController(rootView: ContentView())
+                  self.window = window
+                  window.makeKeyAndVisible()
+                  return true
+              }
+          }
+          EOF
+
+          # ContentView.swift
+          cat > CloudFlareScan/ContentView.swift << 'EOF'
+          import SwiftUI
+
+          struct IPInfo: Identifiable {
+              let id = UUID()
+              var ip: String
+              var port: Int
+              var delay: Double
+              var location: String
+              var isp: String
+              var isAvailable: Bool
+          }
+
+          class NetworkManager: ObservableObject {
+              @Published var ipList: [IPInfo] = []
+              @Published var isScanning = false
+              @Published var progress = 0.0
+              @Published var scanLog = ""
+
+              private let cfRanges = [
+                  "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22",
+                  "103.31.4.0/22", "141.101.64.0/18", "108.162.192.0/18",
+                  "190.93.240.0/20", "188.114.96.0/20", "197.234.240.0/22",
+                  "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13",
+                  "104.24.0.0/14", "172.64.0.0/14", "131.0.72.0/22"
+              ]
+
+              func startScan(customIPs: [String] = [], port: Int = 443) {
+                  isScanning = true
+                  ipList = []
+                  scanLog = ""
+                  scanLog += "📡 开始扫描...\n"
+
+                  let ips = customIPs.isEmpty ? generateIPs() : customIPs
+                  let total = ips.count
+
+                  DispatchQueue.global(qos: .userInitiated).async {
+                      var results: [IPInfo] = []
+                      let group = DispatchGroup()
+                      let semaphore = DispatchSemaphore(value: 50)
+
+                      for (index, ip) in ips.enumerated() {
+                          group.enter()
+                          semaphore.wait()
+                          DispatchQueue.global().async {
+                              let delay = self.testIP(ip, port: port)
+                              if let delay = delay, delay > 0 {
+                                  let info = IPInfo(
+                                      ip: ip,
+                                      port: port,
+                                      delay: delay,
+                                      location: "Unknown",
+                                      isp: "Unknown",
+                                      isAvailable: true
+                                  )
+                                  results.append(info)
+                              }
+                              semaphore.signal()
+                              group.leave()
+                          }
+                      }
+
+                      group.wait()
+
+                      DispatchQueue.main.async {
+                          self.ipList = results.sorted { $0.delay < $1.delay }
+                          self.isScanning = false
+                          self.scanLog += "✅ 扫描完成！找到 \(self.ipList.count) 个可用IP\n"
+                      }
+                  }
+              }
+
+              private func generateIPs() -> [String] {
+                  var ips: [String] = []
+                  for cidr in cfRanges {
+                      let parts = cidr.split(separator: "/")
+                      guard let prefix = Int(parts[1]) else { continue }
+                      let ipParts = parts[0].split(separator: ".")
+                      guard ipParts.count == 4 else { continue }
+                      let base = (UInt32(ipParts[0])! << 24) | (UInt32(ipParts[1])! << 16) | (UInt32(ipParts[2])! << 8) | UInt32(ipParts[3])!
+                      let count = 1 << (32 - prefix)
+                      for i in 1...min(count, 200) {
+                          let addr = base + UInt32(i)
+                          let ip = "\((addr >> 24) & 255).\((addr >> 16) & 255).\((addr >> 8) & 255).\(addr & 255)"
+                          ips.append(ip)
+                      }
+                  }
+                  return ips
+              }
+
+              private func testIP(_ ip: String, port: Int) -> Double? {
+                  let urlString = "https://\(ip):\(port)/cdn-cgi/trace"
+                  guard let url = URL(string: urlString) else { return nil }
+                  let start = Date()
+                  let semaphore = DispatchSemaphore(value: 0)
+                  var result: Double?
+
+                  let task = URLSession.shared.dataTask(with: url) { _, response, _ in
+                      if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                          result = Date().timeIntervalSince(start) * 1000
+                      }
+                      semaphore.signal()
+                  }
+                  task.resume()
+                  _ = semaphore.wait(timeout: .now() + 3)
+                  task.cancel()
+                  return result
+              }
+
+              func copyBestIPs() {
+                  let text = ipList.filter { $0.isAvailable }.prefix(10).map { "\($0.ip):\($0.port)" }.joined(separator: "\n")
+                  UIPasteboard.general.string = text
+              }
+          }
+
+          struct ContentView: View {
+              @StateObject private var networkManager = NetworkManager()
+              @State private var selectedPort = 443
+              @State private var customIPInput = ""
+              @State private var showingAlert = false
+              @State private var alertMessage = ""
+
+              let ports = [443, 2053, 2083, 2087, 2096, 8443]
+
+              var body: some View {
+                  NavigationView {
+                      VStack {
+                          HStack {
+                              Circle()
+                                  .fill(networkManager.isScanning ? Color.green : Color.gray)
+                                  .frame(width: 10, height: 10)
+                              Text(networkManager.isScanning ? "扫描中..." : "就绪")
+                              Spacer()
+                              if networkManager.isScanning {
+                                  ProgressView(value: networkManager.progress)
+                                      .frame(width: 100)
+                              }
+                              Text("\(networkManager.ipList.count) 个IP")
+                          }
+                          .padding()
+
+                          VStack(spacing: 10) {
+                              HStack {
+                                  Picker("端口", selection: $selectedPort) {
+                                      ForEach(ports, id: \.self) { port in
+                                          Text("\(port)").tag(port)
+                                      }
+                                  }
+                                  .pickerStyle(MenuPickerStyle())
+                                  .disabled(networkManager.isScanning)
+
+                                  if networkManager.isScanning {
+                                      Button("停止") {
+                                          networkManager.isScanning = false
+                                      }
+                                      .buttonStyle(.borderedProminent)
+                                      .tint(.red)
+                                  } else {
+                                      Button("开始扫描") {
+                                          let customIPs = customIPInput.split(separator: "\n").map { String($0) }
+                                          networkManager.startScan(customIPs: customIPs, port: selectedPort)
+                                      }
+                                      .buttonStyle(.borderedProminent)
+                                      .tint(.blue)
+                                  }
+
+                                  Button("复制") {
+                                      if networkManager.ipList.isEmpty {
+                                          alertMessage = "请先扫描"
+                                          showingAlert = true
+                                          return
+                                      }
+                                      networkManager.copyBestIPs()
+                                      alertMessage = "✅ 已复制到剪贴板"
+                                      showingAlert = true
+                                  }
+                                  .buttonStyle(.bordered)
+                              }
+
+                              VStack(alignment: .leading) {
+                                  Text("自定义IP（每行一个）")
+                                      .font(.caption)
+                                      .foregroundColor(.secondary)
+                                  TextEditor(text: $customIPInput)
+                                      .frame(height: 50)
+                                      .font(.system(.caption, design: .monospaced))
+                                      .background(Color(.systemGray6))
+                                      .cornerRadius(6)
+                                      .disabled(networkManager.isScanning)
+                              }
+                          }
+                          .padding(.horizontal)
+
+                          List(networkManager.ipList.filter { $0.isAvailable }) { ip in
+                              HStack {
+                                  Text(ip.ip)
+                                      .font(.system(.body, design: .monospaced))
+                                  Spacer()
+                                  VStack(alignment: .trailing) {
+                                      Text("\(String(format: "%.1f", ip.delay))ms")
+                                          .foregroundColor(ip.delay < 50 ? .green : ip.delay < 100 ? .orange : .red)
+                                      Text(ip.location)
+                                          .font(.caption)
+                                          .foregroundColor(.secondary)
+                                  }
+                              }
+                          }
+
+                          ScrollView {
+                              Text(networkManager.scanLog)
+                                  .font(.system(.caption, design: .monospaced))
+                                  .foregroundColor(.gray)
+                                  .frame(maxWidth: .infinity, alignment: .leading)
+                                  .padding()
+                          }
+                          .frame(height: 80)
+                          .background(Color(.systemGray6))
+                      }
+                      .navigationTitle("🌐 CF优选扫描")
+                      .alert("提示", isPresented: $showingAlert) {
+                          Button("确定") {}
+                      } message: {
+                          Text(alertMessage)
+                      }
+                  }
+              }
+          }
+          EOF
+
+      - name: Create Xcode Project File
+        run: |
+          cat > CloudFlareScan.xcodeproj/project.pbxproj << 'EOF'
+          // !$*UTF8*$!
+          {
+              archiveVersion = 1;
+              classes = {
+              };
+              objectVersion = 56;
+              objects = {
+                  /* Begin PBXBuildFile section */
+                  B800000000000001 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B800000000000002 /* AppDelegate.swift */; };
+                  B800000000000003 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B800000000000004 /* ContentView.swift */; };
+                  B800000000000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B800000000000006 /* Assets.xcassets */; };
+                  B800000000000007 /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = B800000000000008 /* Info.plist */; };
+                  /* End PBXBuildFile section */
+
+                  /* Begin PBXFileReference section */
+                  B800000000000002 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+                  B800000000000004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+                  B800000000000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+                  B800000000000008 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+                  B800000000000009 /* CloudFlareScan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CloudFlareScan.app; sourceTree = BUILT_PRODUCTS_DIR; };
+                  /* End PBXFileReference section */
+
+                  /* Begin PBXGroup section */
+                  B80000000000000A = {
+                      isa = PBXGroup;
+                      children = (
+                          B80000000000000B /* CloudFlareScan */,
+                          B80000000000000C /* Products */,
+                      );
+                      sourceTree = "<group>";
+                  };
+                  B80000000000000B /* CloudFlareScan */ = {
+                      isa = PBXGroup;
+                      children = (
+                          B800000000000002 /* AppDelegate.swift */,
+                          B800000000000004 /* ContentView.swift */,
+                          B800000000000006 /* Assets.xcassets */,
+                          B800000000000008 /* Info.plist */,
+                      );
+                      path = CloudFlareScan;
+                      sourceTree = "<group>";
+                  };
+                  B80000000000000C /* Products */ = {
+                      isa = PBXGroup;
+                      children = (
+                          B800000000000009 /* CloudFlareScan.app */,
+                      );
+                      name = Products;
+                      sourceTree = "<group>";
+                  };
+                  /* End PBXGroup section */
+
+                  /* Begin PBXNativeTarget section */
+                  B80000000000000D /* CloudFlareScan */ = {
+                      isa = PBXNativeTarget;
+                      buildConfigurationList = B80000000000000E /* Build configuration list for PBXNativeTarget "CloudFlareScan" */;
+                      buildPhases = (
+                          B80000000000000F /* Sources */,
+                          B800000000000010 /* Resources */,
+                      );
+                      buildRules = (
+                      );
+                      dependencies = (
+                      );
+                      name = CloudFlareScan;
+                      productName = CloudFlareScan;
+                      productReference = B800000000000009 /* CloudFlareScan.app */;
+                      productType = "com.apple.product-type.application";
+                  };
+                  /* End PBXNativeTarget section */
+
+                  /* Begin PBXProject section */
+                  B800000000000011 /* Project object */ = {
+                      isa = PBXProject;
+                      attributes = {
+                          LastSwiftUpdateCheck = 1500;
+                          LastUpgradeCheck = 1500;
+                          TargetAttributes = {
+                              B80000000000000D = {
+                                  CreatedOnToolsVersion = 15.0;
+                              };
+                          };
+                      };
+                      buildConfigurationList = B800000000000012 /* Build configuration list for PBXProject "CloudFlareScan" */;
+                      compatibilityVersion = "Xcode 14.0";
+                      developmentRegion = en;
+                      hasScannedForEncodings = 0;
+                      knownRegions = (
+                          en,
+                          Base,
+                      );
+                      mainGroup = B80000000000000A;
+                      productRefGroup = B80000000000000C /* Products */;
+                      projectDirPath = "";
+                      projectRoot = "";
+                      targets = (
+                          B80000000000000D /* CloudFlareScan */,
+                      );
+                  };
+                  /* End PBXProject section */
+
+                  /* Begin PBXResourcesBuildPhase section */
+                  B800000000000010 /* Resources */ = {
+                      isa = PBXResourcesBuildPhase;
+                      buildActionMask = 2147483647;
+                      files = (
+                          B800000000000005 /* Assets.xcassets in Resources */,
+                          B800000000000007 /* Info.plist in Resources */,
+                      );
+                      runOnlyForDeploymentPostprocessing = 0;
+                  };
+                  /* End PBXResourcesBuildPhase section */
+
+                  /* Begin PBXSourcesBuildPhase section */
+                  B80000000000000F /* Sources */ = {
+                      isa = PBXSourcesBuildPhase;
+                      buildActionMask = 2147483647;
+                      files = (
+                          B800000000000001 /* AppDelegate.swift in Sources */,
+                          B800000000000003 /* ContentView.swift in Sources */,
+                      );
+                      runOnlyForDeploymentPostprocessing = 0;
+                  };
+                  /* End PBXSourcesBuildPhase section */
+
+                  /* Begin XCBuildConfiguration section */
+                  B800000000000013 /* Debug */ = {
+                      isa = XCBuildConfiguration;
+                      buildSettings = {
+                          ALWAYS_SEARCH_USER_PATHS = NO;
+                          ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+                          CLANG_ANALYZER_NONNULL = YES;
+                          CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+                          CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+                          CLANG_ENABLE_MODULES = YES;
+                          CLANG_ENABLE_OBJC_ARC = YES;
+                          CLANG_ENABLE_OBJC_WEAK = YES;
+                          CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+                          CLANG_WARN_BOOL_CONVERSION = YES;
+                          CLANG_WARN_COMMA = YES;
+                          CLANG_WARN_CONSTANT_CONVERSION = YES;
+                          CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+                          CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+                          CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+                          CLANG_WARN_EMPTY_BODY = YES;
+                          CLANG_WARN_ENUM_CONVERSION = YES;
+                          CLANG_WARN_INFINITE_RECURSION = YES;
+                          CLANG_WARN_INT_CONVERSION = YES;
+                          CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+                          CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+                          CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+                          CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+                          CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+                          CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+                          CLANG_WARN_STRICT_PROTOTYPES = YES;
+                          CLANG_WARN_SUSPICIOUS_MOVE = YES;
+                          CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+                          CLANG_WARN_UNREACHABLE_CODE = YES;
+                          CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+                          COPY_PHASE_STRIP = NO;
+                          DEBUG_INFORMATION_FORMAT = dwarf;
+                          DEVELOPMENT_TEAM = "";
+                          ENABLE_STRICT_OBJC_MSGSEND = YES;
+                          ENABLE_TESTABILITY = YES;
+                          ENABLE_USER_SCRIPT_SANDBOXING = YES;
+                          GCC_C_LANGUAGE_STANDARD = gnu17;
+                          GCC_DYNAMIC_NO_PIC = NO;
+                          GCC_NO_COMMON_BLOCKS = YES;
+                          GCC_OPTIMIZATION_LEVEL = 0;
+                          GCC_PREPROCESSOR_DEFINITIONS = (
+                              "DEBUG=1",
+                              "$(inherited)",
+                          );
+                          GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+                          GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+                          GCC_WARN_UNDECLARED_SELECTOR = YES;
+                          GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+                          GCC_WARN_UNUSED_FUNCTION = YES;
+                          GCC_WARN_UNUSED_VARIABLE = YES;
+                          IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+                          LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+                          MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+                          MTL_FAST_MATH = YES;
+                          ONLY_ACTIVE_ARCH = YES;
+                          SDKROOT = iphoneos;
+                          SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+                          SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+                          TARGETED_DEVICE_FAMILY = "1,2";
+                          CODE_SIGN_IDENTITY = "";
+                          CODE_SIGNING_ALLOWED = NO;
+                          CODE_SIGNING_REQUIRED = NO;
+                      };
+                      name = Debug;
+                  };
+                  B800000000000014 /* Release */ = {
+                      isa = XCBuildConfiguration;
+                      buildSettings = {
+                          ALWAYS_SEARCH_USER_PATHS = NO;
+                          ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+                          CLANG_ANALYZER_NONNULL = YES;
+                          CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+                          CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+                          CLANG_ENABLE_MODULES = YES;
+                          CLANG_ENABLE_OBJC_ARC = YES;
+                          CLANG_ENABLE_OBJC_WEAK = YES;
+                          CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+                          CLANG_WARN_BOOL_CONVERSION = YES;
+                          CLANG_WARN_COMMA = YES;
+                          CLANG_WARN_CONSTANT_CONVERSION = YES;
+                          CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+                          CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+                          CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+                          CLANG_WARN_EMPTY_BODY = YES;
+                          CLANG_WARN_ENUM_CONVERSION = YES;
+                          CLANG_WARN_INFINITE_RECURSION = YES;
+                          CLANG_WARN_INT_CONVERSION = YES;
+                          CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+                          CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+                          CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+                          CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+                          CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+                          CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+                          CLANG_WARN_STRICT_PROTOTYPES = YES;
+                          CLANG_WARN_SUSPICIOUS_MOVE = YES;
+                          CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+                          CLANG_WARN_UNREACHABLE_CODE = YES;
+                          CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+                          COPY_PHASE_STRIP = NO;
+                          DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+                          DEVELOPMENT_TEAM = "";
+                          ENABLE_NS_ASSERTIONS = NO;
+                          ENABLE_STRICT_OBJC_MSGSEND = YES;
+                          ENABLE_USER_SCRIPT_SANDBOXING = YES;
+                          GCC_C_LANGUAGE_STANDARD = gnu17;
+                          GCC_NO_COMMON_BLOCKS = YES;
+                          GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+                          GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+                          GCC_WARN_UNDECLARED_SELECTOR = YES;
+                          GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+                          GCC_WARN_UNUSED_FUNCTION = YES;
+                          GCC_WARN_UNUSED_VARIABLE = YES;
+                          IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+                          LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+                          MTL_ENABLE_DEBUG_INFO = NO;
+                          MTL_FAST_MATH = YES;
+                          SDKROOT = iphoneos;
+                          SWIFT_COMPILATION_MODE = wholemodule;
+                          TARGETED_DEVICE_FAMILY = "1,2";
+                          VALIDATE_PRODUCT = YES;
+                          CODE_SIGN_IDENTITY = "";
+                          CODE_SIGNING_ALLOWED = NO;
+                          CODE_SIGNING_REQUIRED = NO;
+                      };
+                      name = Release;
+                  };
+                  B800000000000015 /* Debug */ = {
+                      isa = XCBuildConfiguration;
+                      buildSettings = {
+                          ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+                          ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+                          CODE_SIGN_IDENTITY = "";
+                          CODE_SIGN_STYLE = Manual;
+                          CURRENT_PROJECT_VERSION = 1;
+                          DEVELOPMENT_TEAM = "";
+                          GENERATE_INFOPLIST_FILE = YES;
+                          INFOPLIST_FILE = CloudFlareScan/Info.plist;
+                          INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+                          INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+                          INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+                          INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+                          LD_RUNPATH_SEARCH_PATHS = (
+                              "$(inherited)",
+                              "@executable_path/Frameworks",
+                          );
+                          MARKETING_VERSION = 1.0;
+                          PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios;
+                          PRODUCT_NAME = CloudFlareScan;
+                          SWIFT_EMIT_LOC_STRINGS = YES;
+                          SWIFT_VERSION = 5.0;
+                          TARGETED_DEVICE_FAMILY = "1,2";
+                          CODE_SIGNING_ALLOWED = NO;
+                          CODE_SIGNING_REQUIRED = NO;
+                      };
+                      name = Debug;
+                  };
+                  B800000000000016 /* Release */ = {
+                      isa = XCBuildConfiguration;
+                      buildSettings = {
+                          ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+                          ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+                          CODE_SIGN_IDENTITY = "";
+                          CODE_SIGN_STYLE = Manual;
+                          CURRENT_PROJECT_VERSION = 1;
+                          DEVELOPMENT_TEAM = "";
+                          GENERATE_INFOPLIST_FILE = YES;
+                          INFOPLIST_FILE = CloudFlareScan/Info.plist;
+                          INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+                          INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+                          INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+                          INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+                          LD_RUNPATH_SEARCH_PATHS = (
+                              "$(inherited)",
+                              "@executable_path/Frameworks",
+                          );
+                          MARKETING_VERSION = 1.0;
+                          PRODUCT_BUNDLE_IDENTIFIER = com.cloudflarescan.ios;
+                          PRODUCT_NAME = CloudFlareScan;
+                          SWIFT_EMIT_LOC_STRINGS = YES;
+                          SWIFT_VERSION = 5.0;
+                          TARGETED_DEVICE_FAMILY = "1,2";
+                          CODE_SIGNING_ALLOWED = NO;
+                          CODE_SIGNING_REQUIRED = NO;
+                      };
+                      name = Release;
+                  };
+                  /* End XCBuildConfiguration section */
+
+                  /* Begin XCConfigurationList section */
+                  B80000000000000E /* Build configuration list for PBXNativeTarget "CloudFlareScan" */ = {
+                      isa = XCConfigurationList;
+                      buildConfigurations = (
+                          B800000000000015 /* Debug */,
+                          B800000000000016 /* Release */,
+                      );
+                      defaultConfigurationIsVisible = 0;
+                      defaultConfigurationName = Release;
+                  };
+                  B800000000000012 /* Build configuration list for PBXProject "CloudFlareScan" */ = {
+                      isa = XCConfigurationList;
+                      buildConfigurations = (
+                          B800000000000013 /* Debug */,
+                          B800000000000014 /* Release */,
+                      );
+                      defaultConfigurationIsVisible = 0;
+                      defaultConfigurationName = Release;
+                  };
+                  /* End XCConfigurationList section */
+              };
+              rootObject = B800000000000011 /* Project object */;
+          }
+          EOF
+
+      - name: Create Assets.xcassets
+        run: |
+          mkdir -p CloudFlareScan/Assets.xcassets/AppIcon.appiconset
+          mkdir -p CloudFlareScan/Assets.xcassets/AccentColor.colorset
+          
+          cat > CloudFlareScan/Assets.xcassets/Contents.json << 'EOF'
+          {
+            "info" : {
+              "author" : "xcode",
+              "version" : 1
+            }
+          }
+          EOF
+          
+          cat > CloudFlareScan/Assets.xcassets/AppIcon.appiconset/Contents.json << 'EOF'
+          {
+            "images" : [
+              {
+                "idiom" : "universal",
+                "platform" : "ios",
+                "size" : "1024x1024"
+              }
+            ],
+            "info" : {
+              "author" : "xcode",
+              "version" : 1
+            }
+          }
+          EOF
+          
+          cat > CloudFlareScan/Assets.xcassets/AccentColor.colorset/Contents.json << 'EOF'
+          {
+            "colors" : [
+              {
+                "idiom" : "universal"
+              }
+            ],
+            "info" : {
+              "author" : "xcode",
+              "version" : 1
+            }
+          }
+          EOF
 
       - name: Build Archive
         run: |
