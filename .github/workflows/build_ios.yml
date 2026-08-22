@@ -1,3 +1,5 @@
+
+
 ```yaml
 name: IPSelector Build
 
@@ -10,20 +12,19 @@ permissions:
   contents: write
 
 jobs:
- build:
+  build:
     runs-on: macos-14
     timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install deps
+      - name: Install zsign
         run: brew install zsign
 
       - name: Generate Swift App
         run: |
           mkdir -p IPSelector
-
           cat > IPSelector/Info.plist << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -39,20 +40,18 @@ jobs:
           </dict>
           </plist>
           EOF
-
           cat > IPSelector/App.swift << 'EOF'
           import SwiftUI
           @main struct App: App { var body: some Scene { WindowGroup { ContentView() } } }
           EOF
-
           cat > IPSelector/ContentView.swift << 'EOF'
           import SwiftUI
           import Foundation
-
+          
           struct ContentView: View {
               @StateObject var vm = ProxyVM()
               @State private var showScanner = false
-
+              
               var body: some View {
                   NavigationStack {
                       ScrollView {
@@ -73,10 +72,9 @@ jobs:
                               }
                           }
                       }
-                      .sheet(isPresented: $showScanner) { ScannerView(vm: vm) }
                   }
               }
-
+              
               private var headerView: some View {
                   VStack(spacing: 12) {
                       Text("◈ IP PROXY SELECTOR ◈")
@@ -94,7 +92,7 @@ jobs:
                           .shadow(color: .cyan.opacity(0.3), radius: 10)
                   )
               }
-
+              
               private var statsView: some View {
                   HStack(spacing: 15) {
                       StatCard(label: "总节点", value: "\(vm.nodes.count)", color: .cyan)
@@ -102,7 +100,7 @@ jobs:
                       StatCard(label: "平均延迟", value: "\(vm.avgLatency)ms", color: .orange)
                   }
               }
-
+              
               private var inputSection: some View {
                   VStack(alignment: .leading, spacing: 12) {
                       Text("批量导入 IP")
@@ -114,29 +112,21 @@ jobs:
                           .background(Color(red: 0.1, green: 0.1, blue: 0.15))
                           .cornerRadius(12)
                       HStack {
-                          Button("开始扫描") {
-                              Task { await vm.scan() }
-                          }
-                          .buttonStyle(.borderedProminent)
-                          .tint(.cyan)
-                          .disabled(vm.scanning)
+                          Button("开始扫描") { Task { await vm.scan() } }
+                              .buttonStyle(.borderedProminent)
+                              .tint(.cyan)
+                              .disabled(vm.scanning)
                           Button("清空") { vm.clear() }
                               .buttonStyle(.border)
-                          Button("粘贴从剪贴板") { vm.pasteFromClipboard() }
+                          Button("粘贴") { vm.pasteFromClipboard() }
                               .buttonStyle(.border)
                       }
-                      if vm.scanning {
-                          ProgressView()
-                              .progressViewStyle(.linear)
-                      }
+                      if vm.scanning { ProgressView() }
                   }
                   .padding()
-                  .background(
-                      RoundedRectangle(cornerRadius: 16)
-                          .fill(Color(red: 0.05, green: 0.1, blue: 0.15))
-                  )
+                  .background(RoundedRectangle(cornerRadius: 16).fill(Color(red: 0.05, green: 0.1, blue: 0.15)))
               }
-
+              
               private var resultsSection: some View {
                   VStack(alignment: .leading, spacing: 8) {
                       HStack {
@@ -144,7 +134,7 @@ jobs:
                               .font(.headline)
                               .foregroundStyle(.cyan)
                           Spacer()
-                          Button("复制全部可用") {
+                          Button("复制全部") {
                               let good = vm.goodNodes.map { "\($0.ip):\($0.port)" }.joined(separator: "\n")
                               UIPasteboard.general.string = good
                           }
@@ -152,122 +142,23 @@ jobs:
                           .foregroundStyle(.green)
                       }
                       LazyVStack(spacing: 8) {
-                          ForEach(vm.displayedNodes) { node in
-                              NodeRow(node: node)
-                          }
+                          ForEach(vm.displayedNodes) { node in NodeRow(node: node) }
                       }
                       .frame(maxHeight: 400)
-                      .scrollIndicators(.hidden)
-                      if vm.nodes.isEmpty {
-                          Text("暂无结果，请导入IP并扫描")
-                              .foregroundStyle(.gray.opacity(0.5))
-                              .frame(maxWidth: .infinity, maxHeight: .infinity)
-                      }
                   }
                   .padding()
-                  .background(
-                      RoundedRectangle(cornerRadius: 16)
-                          .fill(Color(red: 0.05, green: 0.1, blue: 0.15))
-                  )
+                  .background(RoundedRectangle(cornerRadius: 16).fill(Color(red: 0.05, green: 0.1, blue: 0.15)))
               }
           }
-
+          
           struct StatCard: View {
               let label, value: String
               let color: Color
               var body: some View {
                   VStack(spacing: 4) {
-                      Text(value)
-                          .font(.system(size: 24, weight: .bold, design: .monospace))
-                          .foregroundStyle(color)
-                      Text(label)
-                          .font(.caption2)
-                          .foregroundStyle(.gray)
+                      Text(value).font(.system(size: 24, weight: .bold, design: .monospace)).foregroundStyle(color)
+                      Text(label).font(.caption2).foregroundStyle(.gray)
                   }
                   .frame(maxWidth: .infinity)
                   .padding()
-                  .background(
-                      RoundedRectangle(cornerRadius: 12)
-                          .fill(Color(red: 0.1, green: 0.15, blue: 0.2))
-                  )
-              }
-          }
-
-          struct NodeRow: View {
-              let node: ProxyNode
-              var body: some View {
-                  HStack(spacing: 12) {
-                      VStack(alignment: .leading, spacing: 2) {
-                          Text(node.name)
-                              .font(.system(.body, design: .monospace))
-                              .foregroundStyle(.white)
-                          Text("\(node.ip):\(node.port)")
-                              .font(.caption2)
-                              .foregroundStyle(.gray)
-                      }
-                      Spacer()
-                      VStack(alignment: .trailing, spacing: 2) {
-                          Text(node.country).font(.caption).foregroundStyle(.cyan)
-                          Text(node.isp).font(.caption).foregroundStyle(.green)
-                      }
-                      Text("\(node.latency)ms")
-                          .font(.system(.body, design: .monospace))
-                          .foregroundStyle(node.latency < 20 ? .green : node.latency < 500 ? .orange : .red)
-                          .padding(.horizontal, 8)
-                          .padding(.vertical, 4)
-                          .background(Color.black.opacity(0.3))
-                          .cornerRadius(6)
-                      Button(action: {
-                          UIPasteboard.general.string = "\(node.ip):\ (node.port)"
-                      }) {
-                          Image(systemName: "square.on.square")
-                              .foregroundStyle(.cyan)
-                      }
-                  }
-                  .padding()
-                  .background(
-                      RoundedRectangle(cornerRadius: 12)
-                          .fill(Color(red: 0.08, green: 0.12, blue: 0.18))
-                  )
-              }
-          }
-
-          struct ScannerView: View {
-              @ObservedObject var vm: ProxyVM
-              @Environment(\.dismiss) var dismiss
-
-              var body: some View {
-                  NavigationStack {
-                      List {
-                          Section("IPv4/IPv6 扫描") {
-                              VStack(alignment: .leading) {
-                                  Text("网段: \(vm.scanCIDR)")
-                                      .foregroundStyle(.gray)
-                                  Slider(value: $vm.scanProgress, in: 0...100)
-                                  if vm.scanning { ProgressView() }
-                              }
-                              Button("启动扫描") { Task { await vm.scanCIDR() } }
-                                  .disabled(vm.scanning)
-                          }
-                          Section("设置") {
-                              Toggle("IPv4", isOn: Binding(get: { vm.scanIPv4 }, set: { vm.scanIPv4 = $0 }))
-                              Toggle("IPv6", isOn: Binding(get: { vm.scanIPv6 }, set: { vm.scanIPv6 = $0 }))
-                              Picker("端口", selection: $vm.scanPorts) {
-                                  Text("常用端口").tag(0)
-                                  Text("全端口").tag(1)
-                                  Text("自定义").tag(2)
-                              }
-                          }
-                      }
-                      .navigationTitle("高级扫描")
-                      .navigationBarTitleDisplayMode(.inline)
-                      .toolbar {
-                          ToolbarItem(placement: .cancellationAction) {
-                              Button("取消") { dismiss() }
-                          }
-                      }
-                  }
-              }
-          }
-          EOF
-```
+                  .background(RoundedRectangle(cornerRadius: 12).fill(Color(red
