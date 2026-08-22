@@ -31,7 +31,7 @@ jobs:
         run: |
           cat > main.py << 'PYEOF'
           #!/usr/bin/env python3
-          import asyncio, time, ipaddress
+          import asyncio, time
           from pathlib import Path
           from dataclasses import dataclass
           import yaml, maxminddb
@@ -76,7 +76,7 @@ jobs:
                   _, w = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=3)
                   w.close()
                   await w.wait_closed()
-                  return int((time.perf_counter() - s) * 1000)
+                  return int((time.perf_counter() - s) * 100)
               except Exception:
                   return 9999
           
@@ -89,7 +89,7 @@ jobs:
               return Node(ip=ip, port=port, name=f"{c}-{r}-{isp}", country=c, region=r, isp=isp, tcp_ms=tcp, tls_ms=tls, http_ms=http, score=score)
           
           async def main():
-              targets = [("104.16.0.1", 443), ("1.0.0.1", 443), ("8.8.8.8", 43)]
+              targets = [("104.16.0.1", 443), ("1.0.0.1", 443), ("8.8.8.8", 443)]
               sem = asyncio.Semaphore(50)
               
               async def run(t):
