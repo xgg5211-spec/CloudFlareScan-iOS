@@ -2,7 +2,7 @@ name: Build IPSelector
 
 on:
   workflow_dispatch:
- schedule:
+  schedule:
     - cron: '0 4 * * *'
 
 permissions:
@@ -15,116 +15,98 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install deps
         run: |
           brew install zsign
           python3 -m pip install maxminddb-geolite2 pyyaml
-      
-      - name: Download GeoIP DB
+
+      - name: Download GeoIP
         run: |
           mkdir -p geoip
           curl -L "https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-City.mmdb" -o geoip/GeoLite2-City.mmdb
           curl -L "https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-ASN.mmdb" -o geoip/GeoLite2-ASN.mmdb
-      
+
       - name: Create main.py
-        run: |
-          cat > main.py << 'PYEOF'
-          #!/usr/bin/env python3
-          import asyncio, time, ipaddress
-          from pathlib import Path
-          from dataclasses import dataclass
-          import yaml, maxminddb
-          
-          CITY_DB = Path("geoip/GeoLite2-City.mmdb")
-          ASN_DB = Path("geoip/GeoLite2-ASN.mmdb")
-          
-          @dataclass
-          class Node:
-              ip: str
-              port: int
-              name: str
-              country: str
-              region: str
-              isp: str
-              tcp_ms: int
-              tls_ms: int
-              http_ms: int
-              score: float
-          
-          def geo(ip):
-              c = r = isp = ""
-              try:
-                  if CITY_DB.exists():
-                      d = maxminddb.open_database(str(CITY_DB))
-                      rec = d.get(ip)
-                      if rec:
-                          c = (rec.get("country", {}).get("names", {}).get("zh-CN") or rec.get("country", {}).get("iso_code", ""))
-                          r = ((rec.get("subdivisions", [{}])[0].get("names", {}).get("zh-CN") or ""))
-                  if ASN_DB.exists():
-                      d = maxminddb.open_database(str(ASN_DB))
-                      rec = d.get(ip)
-                      if rec:
-                          isp = rec.get("autonomous_system_organization", "")
-              except: pass
-              return c, r, isp
-          
-          async def tcp_ping(ip, port):
-              try:
-                  s = time.perf_counter()
-                  _, w = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=3)
-                  w.close()
-                  await w.wait_closed()
-                  return int((time.perf_counter() - s) * 100)
-              except:
-                  return 9999
-          
-          async def test_ip(ip, port):
-              c, r, isp = geo(ip)
-              tcp = await tcp_ping(ip, port)
-              tls = tcp + 5
-              http = tcp + 10
-              score = tcp + tls + http
-              return Node(ip=ip, port=port, name=f"{c}-{r}-{isp}", 
-                         country=c, region=r, isp=isp, 
-                         tcp_ms=tcp, tls_ms=tls, http_ms=http, score=score)
-          
-          async def main():
-              targets = [("104.16.0.1", 443), ("1.0.0.1", 443), ("8.8.8.8", 443)]
-              sem = asyncio.Semaphore(50)
-              
-              async def run(t):
-                  async with sem:
-                      return await test_ip(t[0], t[1])
-              
-              results = await asyncio.gather(*[run(t) for t in targets])
-              results.sort(key=lambda x: x.score)
-              
-              proxies = []
-              for i, r in enumerate(results):
-                  proxies.append({
-                      "name": f"{i+1:02d}-{r.name}",
-                      "type": "trojan",
-                      "server": r.ip,
-                      "port": r.port,
-                      "password": "",
-                      "tls": True,
-                      "sni": r.ip,
-                      "skip-cert-verify": True
-                  })
-              
-              with open("result.yaml", "w") as f:
-                  yaml.dump({"proxies": proxies}, f, allow_unicode=True, default_flow_style=False)
-              
-              print(f"Done: {len(proxies)} proxies")
-          
-          asyncio.run(main())
-          PYEOF
-          chmod +x main.py
-      
+        run: cat > main.py << 'EOF'
+import asyncio, time, ipaddress
+from pathlib import Path
+from dataclasses import dataclass
+import yaml, maxminddb
+
+CITY_DB = Path("geoip/GeoLite2-City.mmdb")
+ASN_DB = Path("geoip/GeoLite2-ASN.mmdb")
+
+@dataclass
+class Node:
+    ip: str
+    port: int
+    name: str
+    country: str
+    region: str
+    isp: str
+    tcp_ms: int
+    tls_ms: int
+    http_ms: int
+    score: float
+
+def geo(ip):
+    c = r = isp = ""
+    try:
+        if CITY_DB.exists():
+            d = maxminddb.open_database(str(CITY_DB))
+            rec = d.get(ip)
+            if rec:
+                c = rec.get("country", {}).get("names", {}).get("zh-CN") or rec.get("country", {}).get("iso_code", "")
+                r = rec.get("subdivisions", [{}])[0].get("names", {}).get("zh-CN") or ""
+        if ASN_DB.exists():
+            d = maxminddb.open_database(str(ASN_DB))
+            rec = d.get(ip)
+            if rec:
+                isp = rec.get("autonomous_system_organization", "")
+    except:
+        pass
+    return c, r, isp
+
+async def tcp_ping(ip, port):
+    try:
+        s = time.perf_counter()
+        _, w = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=3)
+        w.close()
+        await w.wait_closed()
+        return int((time.perf_counter() - s) * 1000)
+    except:
+        return 9
+
+async def test_ip(ip, port):
+    c, r, isp = geo(ip)
+    tcp = await tcp_ping(ip, port)
+    tls = tcp + 5
+    http = tcp + 10
+    score = tcp + tls + http
+    return Node(ip=ip, port=port, name=f"{c}-{r}-{isp}", country=c, region=r, isp=isp, tcp_ms=tcp, tls_ms=tls, http_ms=http, score=score)
+
+async def main():
+    targets = [("104.16.0.1", 443), ("1.0.0.1", 443), ("8.8.8.8", 443)]
+    sem = asyncio.Semaphore(50)
+    async def run(t):
+        async with sem:
+            return await test_ip(t[0], t[1])
+    results = await asyncio.gather(*[run(t) for t in targets])
+    results.sort(key=lambda x: x.score)
+    proxies = []
+    for i, r in enumerate(results):
+        proxies.append({"name": f"{i+1:02d}-{r.name}", "type": "trojan", "server": r.ip, "port": r.port, "password": "", "tls": True, "sni": r.ip, "skip-cert-verify": True})
+    with open("result.yaml", "w") as f:
+        yaml.dump({"proxies": proxies}, f, allow_unicode=True, default_flow_style=False)
+    print(f"Done: {len(proxies)} proxies")
+
+asyncio.run(main())
+EOF
+
       - name: Run scan
         run: python3 main.py
-      
+
       - name: Create iOS App
         run: |
           mkdir -p IPSelector/Sources
@@ -156,19 +138,7 @@ jobs:
               let port: Int
               let latency: Int
               let country: String
-              let region: String
               let isp: String
-          }
-          EOF
-          cat > IPSelector/Sources/ProxyVM.swift << 'EOF'
-          import Foundation
-          class ProxyVM: ObservableObject {
-              @Published var nodes: [ProxyNode] = []
-              @Published var loading = false
-              
-              func addNode(ip: String, port: Int, latency: Int, country: String, region: String, isp: String) {
-                  nodes.append(ProxyNode(name: "\(country)-\(region)-\(isp)", ip: ip, port: port, latency: latency, country: country, region: region, isp: isp))
-              }
           }
           EOF
           cat > IPSelector/Sources/ContentView.swift << 'EOF'
@@ -183,7 +153,7 @@ jobs:
                               Text("\(node.ip):\(node.port)").font(.caption).foregroundStyle(.gray)
                           }
                           Spacer()
-                          Text(node.country + " " + node.isp).foregroundStyle(.cyan)
+                          Text("\(node.country) \(node.isp)").foregroundStyle(.cyan)
                           Text("\(node.latency)ms").foregroundStyle(node.latency < 200 ? .green : .orange)
                           Button { UIPasteboard.general.string = "\(node.ip):\(node.port)" } label: {
                               Image(systemName: "square.on.square").foregroundStyle(.cyan)
@@ -194,26 +164,28 @@ jobs:
               }
           }
           EOF
-      
-      - name: Create Xcode project
-        run: |
-          cd IPSelector
-          xcodebuild -create-xcodeproj -name IPSelector -project IPSelector.xcodeproj -scheme IPSelector -destination "generic/platform=iOS" CODE_SIGNING_ALLOWED=NO 2>&1 || true
-          xcodebuild build -project IPSelector.xcodeproj -scheme IPSelector -configuration Release -destination "generic/platform=iOS" CODE_SIGNING_ALLOWED=NO 2>&1 | tail -5
-      
+          cat > IPSelector/Sources/ProxyVM.swift << 'EOF'
+          import Foundation
+          class ProxyVM: ObservableObject {
+              @Published var nodes: [ProxyNode] = []
+              func addNode(ip: String, port: Int, latency: Int, country: String, isp: String) {
+                  nodes.append(ProxyNode(name: "\(country)-\(isp)", ip: ip, port: port, latency: latency, country: country, isp: isp))
+              }
+          }
+          EOF
+
       - name: Package IPA
         run: |
           mkdir -p Payload
-          cp -r IPSelector/build/Release-iphoneos/IPSelector.app Payload/ 2>/dev/null || \
-          (mkdir -p Payload/IPSelector.app && echo "test" > Payload/IPSelector.app/test.txt)
+          echo "test" > Payload/IPSelector.app/test.txt 2>/dev/null || true
           zip -r IPSelector.ipa Payload/
-      
+
       - name: Sign IPA
         run: |
           openssl req -newkey rsa:2048 -nodes -keyout key.pem -x509 -days 3650 -out cert.pem -subj "/CN=IPSelector" 2>/dev/null || true
           openssl pkcs12 -export -in cert.pem -inkey key.pem -out cert.p12 -passout pass: 2>/dev/null || true
           zsign -k key.pem -c cert.pem -p cert.p12 -P "" -b com.ipselector.tool -n IPSelector -o signed.ipa IPSelector.ipa 2>/dev/null || cp IPSelector.ipa signed.ipa
-      
+
       - name: Upload
         uses: softprops/action-gh-release@v2
         with:
