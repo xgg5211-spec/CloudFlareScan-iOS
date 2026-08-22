@@ -1,9 +1,7 @@
 ```yaml
-name: IPSelector Auto Build
+name: IPSelector Build
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
   schedule:
     - cron: '0 4 * * *'
@@ -11,142 +9,265 @@ on:
 permissions:
   contents: write
 
-env:
-  BUNDLE_ID: com.ipselector.tool
-
 jobs:
-  build:
+ build:
     runs-on: macos-14
     timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install zsign & Python deps
-        run: |
-          brew install zsign
-          python3 -m pip install --quiet maxminddb-geolite2 pyyaml
-
-      - name: Download GeoIP DB
-        run: |
-          mkdir -p geoip
-          curl -L "https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-City.mmdb" -o geoip/GeoLite2-City.mmdb
-          curl -L "https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-ASN.mmdb" -o geoip/GeoLite2-ASN.mmdb
+      - name: Install deps
+        run: brew install zsign
 
       - name: Generate Swift App
         run: |
           mkdir -p IPSelector
+
           cat > IPSelector/Info.plist << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
-            <key>CFBundleIdentifier</key><string>${{ env.BUNDLE_ID }}</string>
+            <key>CFBundleIdentifier</key><string>com.ipselector.tool</string>
             <key>CFBundleName</key><string>IPSelector</string>
             <key>CFBundleDisplayName</key><string>IP优选</string>
             <key>CFBundleVersion</key><string>1</string>
-            <key>CFBundleShortVersionString</key><string>1.0</string>
+            <key>CFBundleShortVersionString</key><string>2.0</string>
             <key>MinimumOSVersion</key><string>15.0</string>
             <key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoads</key><true/></dict>
           </dict>
           </plist>
           EOF
 
-          cat > IPSelector/IPSelectorApp.swift << 'EOF'
+          cat > IPSelector/App.swift << 'EOF'
           import SwiftUI
           @main struct App: App { var body: some Scene { WindowGroup { ContentView() } } }
           EOF
 
           cat > IPSelector/ContentView.swift << 'EOF'
           import SwiftUI
+          import Foundation
+
           struct ContentView: View {
-              @State var nodes: [String] = []
-              @State var loading = false
+              @StateObject var vm = ProxyVM()
+              @State private var showScanner = false
+
               var body: some View {
-                  List(nodes, id: \.self) { Text($0) }
-                      .task { await load() }
+                  NavigationStack {
+                      ScrollView {
+                          VStack(spacing: 20) {
+                              headerView
+                              statsView
+                              inputSection
+                              resultsSection
+                          }
+                          .padding()
+                      }
+                      .background(Color.black)
+                      .navigationTitle("IP优选 v2.0")
+                      .toolbar {
+                          ToolbarItem(placement: .topBarTrailing) {
+                              Button { showScanner.toggle() } label: {
+                                  Image(systemName: "scanner.line.dashed")
+                              }
+                          }
+                      }
+                      .sheet(isPresented: $showScanner) { ScannerView(vm: vm) }
+                  }
               }
-              func load() async {
-                  loading = true
-                  defer { loading = false }
-                  guard let url = URL(string: "https://github.com/\(ProcessInfo.processInfo.environment["GITHUB_REPOSITORY"] ?? "user/repo")/releases/latest/download/result.yaml") else { return }
-                  do {
-                      let (data, _) = try await URLSession.shared.data(from: url)
-                      let text = String(data: data, encoding: .utf8) ?? ""
-                      nodes = text.components(separatedBy: "\n").filter { $0.contains("server:") || $0.contains("- ") }
-                  } catch { print(error) }
+
+              private var headerView: some View {
+                  VStack(spacing: 12) {
+                      Text("◈ IP PROXY SELECTOR ◈")
+                          .font(.system(size: 24, weight: .bold, design: .monospace))
+                          .foregroundStyle(.cyan)
+                      Text("TLS 握手 | 真连接测速 | 归属地识别")
+                          .font(.caption)
+                          .foregroundStyle(.green.opacity(0.8))
+                          .frame(maxWidth: .infinity)
+                  }
+                  .padding()
+                  .background(
+                      RoundedRectangle(cornerRadius: 16)
+                          .fill(Color(red: 0.05, green: 0.1, blue: 0.15))
+                          .shadow(color: .cyan.opacity(0.3), radius: 10)
+                  )
+              }
+
+              private var statsView: some View {
+                  HStack(spacing: 15) {
+                      StatCard(label: "总节点", value: "\(vm.nodes.count)", color: .cyan)
+                      StatCard(label: "已优选", value: "\(vm.goodNodes.count)", color: .green)
+                      StatCard(label: "平均延迟", value: "\(vm.avgLatency)ms", color: .orange)
+                  }
+              }
+
+              private var inputSection: some View {
+                  VStack(alignment: .leading, spacing: 12) {
+                      Text("批量导入 IP")
+                          .font(.headline)
+                          .foregroundStyle(.gray)
+                      TextEditor(text: $vm.inputText)
+                          .font(.system(.body, design: .monospace))
+                          .frame(height: 120)
+                          .background(Color(red: 0.1, green: 0.1, blue: 0.15))
+                          .cornerRadius(12)
+                      HStack {
+                          Button("开始扫描") {
+                              Task { await vm.scan() }
+                          }
+                          .buttonStyle(.borderedProminent)
+                          .tint(.cyan)
+                          .disabled(vm.scanning)
+                          Button("清空") { vm.clear() }
+                              .buttonStyle(.border)
+                          Button("粘贴从剪贴板") { vm.pasteFromClipboard() }
+                              .buttonStyle(.border)
+                      }
+                      if vm.scanning {
+                          ProgressView()
+                              .progressViewStyle(.linear)
+                      }
+                  }
+                  .padding()
+                  .background(
+                      RoundedRectangle(cornerRadius: 16)
+                          .fill(Color(red: 0.05, green: 0.1, blue: 0.15))
+                  )
+              }
+
+              private var resultsSection: some View {
+                  VStack(alignment: .leading, spacing: 8) {
+                      HStack {
+                          Text("扫描结果 (\(vm.nodes.count))")
+                              .font(.headline)
+                              .foregroundStyle(.cyan)
+                          Spacer()
+                          Button("复制全部可用") {
+                              let good = vm.goodNodes.map { "\($0.ip):\($0.port)" }.joined(separator: "\n")
+                              UIPasteboard.general.string = good
+                          }
+                          .font(.caption)
+                          .foregroundStyle(.green)
+                      }
+                      LazyVStack(spacing: 8) {
+                          ForEach(vm.displayedNodes) { node in
+                              NodeRow(node: node)
+                          }
+                      }
+                      .frame(maxHeight: 400)
+                      .scrollIndicators(.hidden)
+                      if vm.nodes.isEmpty {
+                          Text("暂无结果，请导入IP并扫描")
+                              .foregroundStyle(.gray.opacity(0.5))
+                              .frame(maxWidth: .infinity, maxHeight: .infinity)
+                      }
+                  }
+                  .padding()
+                  .background(
+                      RoundedRectangle(cornerRadius: 16)
+                          .fill(Color(red: 0.05, green: 0.1, blue: 0.15))
+                  )
+              }
+          }
+
+          struct StatCard: View {
+              let label, value: String
+              let color: Color
+              var body: some View {
+                  VStack(spacing: 4) {
+                      Text(value)
+                          .font(.system(size: 24, weight: .bold, design: .monospace))
+                          .foregroundStyle(color)
+                      Text(label)
+                          .font(.caption2)
+                          .foregroundStyle(.gray)
+                  }
+                  .frame(maxWidth: .infinity)
+                  .padding()
+                  .background(
+                      RoundedRectangle(cornerRadius: 12)
+                          .fill(Color(red: 0.1, green: 0.15, blue: 0.2))
+                  )
+              }
+          }
+
+          struct NodeRow: View {
+              let node: ProxyNode
+              var body: some View {
+                  HStack(spacing: 12) {
+                      VStack(alignment: .leading, spacing: 2) {
+                          Text(node.name)
+                              .font(.system(.body, design: .monospace))
+                              .foregroundStyle(.white)
+                          Text("\(node.ip):\(node.port)")
+                              .font(.caption2)
+                              .foregroundStyle(.gray)
+                      }
+                      Spacer()
+                      VStack(alignment: .trailing, spacing: 2) {
+                          Text(node.country).font(.caption).foregroundStyle(.cyan)
+                          Text(node.isp).font(.caption).foregroundStyle(.green)
+                      }
+                      Text("\(node.latency)ms")
+                          .font(.system(.body, design: .monospace))
+                          .foregroundStyle(node.latency < 20 ? .green : node.latency < 500 ? .orange : .red)
+                          .padding(.horizontal, 8)
+                          .padding(.vertical, 4)
+                          .background(Color.black.opacity(0.3))
+                          .cornerRadius(6)
+                      Button(action: {
+                          UIPasteboard.general.string = "\(node.ip):\ (node.port)"
+                      }) {
+                          Image(systemName: "square.on.square")
+                              .foregroundStyle(.cyan)
+                      }
+                  }
+                  .padding()
+                  .background(
+                      RoundedRectangle(cornerRadius: 12)
+                          .fill(Color(red: 0.08, green: 0.12, blue: 0.18))
+                  )
+              }
+          }
+
+          struct ScannerView: View {
+              @ObservedObject var vm: ProxyVM
+              @Environment(\.dismiss) var dismiss
+
+              var body: some View {
+                  NavigationStack {
+                      List {
+                          Section("IPv4/IPv6 扫描") {
+                              VStack(alignment: .leading) {
+                                  Text("网段: \(vm.scanCIDR)")
+                                      .foregroundStyle(.gray)
+                                  Slider(value: $vm.scanProgress, in: 0...100)
+                                  if vm.scanning { ProgressView() }
+                              }
+                              Button("启动扫描") { Task { await vm.scanCIDR() } }
+                                  .disabled(vm.scanning)
+                          }
+                          Section("设置") {
+                              Toggle("IPv4", isOn: Binding(get: { vm.scanIPv4 }, set: { vm.scanIPv4 = $0 }))
+                              Toggle("IPv6", isOn: Binding(get: { vm.scanIPv6 }, set: { vm.scanIPv6 = $0 }))
+                              Picker("端口", selection: $vm.scanPorts) {
+                                  Text("常用端口").tag(0)
+                                  Text("全端口").tag(1)
+                                  Text("自定义").tag(2)
+                              }
+                          }
+                      }
+                      .navigationTitle("高级扫描")
+                      .navigationBarTitleDisplayMode(.inline)
+                      .toolbar {
+                          ToolbarItem(placement: .cancellationAction) {
+                              Button("取消") { dismiss() }
+                          }
+                      }
+                  }
               }
           }
           EOF
-
-      - name: Generate Scan Script
-        run: |
-          cat > scan.py << 'PYEOF'
-          #!/usr/bin/env python3
-          import asyncio, socket, ssl, time, json, ipaddress
-          from pathlib import Path
-          from dataclasses import dataclass
-          import yaml
-          import maxminddb
-          CITY_DB = Path("geoip/GeoLite2-City.mmdb")
-          ASN_DB  = Path("geoip/GeoLite2-ASN.mmdb")
-          @dataclass
-          class R:
-              ip:str; port:int; c:str=""; r:str=""; isp:str=""
-              tcp:int=9999; tls:int=9999; score:float=9999; err:str=""
-          def geo(ip):
-              c=r=isp=""
-              try:
-                  if CITY_DB.exists():
-                      d=maxminddb.open_database(str(CITY_DB)); rec=d.get(ip)
-                      if rec:
-                          c=(rec.get("country",{}).get("names",{}).get("zh-CN") or rec.get("country",{}).get("iso_code",""))
-                          r=((rec.get("subdivisions",[{}])[0].get("names",{}).get("zh-CN") or ""))
-                  if ASN_DB.exists():
-                      d=maxminddb.open_database(str(ASN_DB)); rec=d.get(ip)
-                      if rec: isp=rec.get("autonomous_system_organization","")
-              except: pass
-              return c,r,isp
-          async def tcp(ip,port):
-              try:
-                  s=time.perf_counter(); _,w=await asyncio.wait_for(asyncio.open_connection(ip,port),timeout=3); w.close(); await w.wait_closed(); return int((time.perf_counter()-s)*100)
-              except: return None
-          async def main():
-              targets=[("104.16.0.1",43),("1.0.0.1",443)]
-              sem=asyncio.Semaphore(100); results=[]
-              async def run(t):
-                  async with sem:
-                      ip,port=t; c,r,isp=geo(ip)
-                      r=R(ip=ip,port=port,name=f"{c}-{r}-{isp}" if c else f"{ip}",c=c,rsp=r,isp=isp)
-                      t1=await tcp(ip,port)
-                      if t1: r.tcp=t1; r.score=t1
-                      return r
-              results=await asyncio.gather(*[run(t) for t in targets])
-              results.sort(key=lambda x:(x.err != "",x.score))
-              proxies=[]
-              for i,r in enumerate(results[:50]):
-                  if r.err: continue
-                  proxies.append({"name":f"{i+1:02d}-{r.name}","type":"trojan","server":r.ip,"port":r.port,"password":"","tls":True,"sni":r.ip})
-              with open("result.yaml","w") as f: yaml.dump({"proxies":proxies},f,allow_unicode=True,default_flow_style=False)
-              print(f"Done: {len(proxies)} proxies")
-          asyncio.run(main())
-          PYEOF
-          chmod +x scan.py
-
-      - name: Run Scan
-        run: python3 scan.py
-
-      - name: Build Xcode Project
-        run: |
-          xcodebuild create-xcodeproj -project IPSelector.xcodeproj -scheme IPSelector -destination "generic/platform=iOS" CODE_SIGNING_ALLOWED=NO
-          xcodebuild build -project IPSelector.xcodeproj -scheme IPSelector -configuration Release -destination "generic/platform=iOS" CODE_SIGNING_ALLOWED=NO
-
-      - name: Package IPA
-        run: |
-          mkdir -p Payload
-          cp -r build/Release-iphoneos/IPSelector.app Payload/
-          zip -r IPSelector.ipa Payload
-
-      - name: Sign IPA
-        run: |
-          openssl req -newkey rsa:2
+```
